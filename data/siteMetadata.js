@@ -1,28 +1,19 @@
 /** @type {import("pliny/config").PlinyConfig } */
 const siteMetadata = {
-  title: 'Next.js Starter Blog',
-  author: 'Tails Azimuth',
-  headerTitle: 'TailwindBlog',
-  description: 'A blog created with Next.js and Tailwind.css',
-  language: 'en-us',
+  title: '김희훈 | Full Stack Developer', // 브라우저 탭에 뜨는 제목
+  author: 'Kim Hee Hoon',
+  headerTitle: '천천히, 꾸준히', // 사이트 좌측 상단 로고 텍스트
+  description: '끊임없는 도전과 성장을 통해 가치를 창출하는 개발자, 김희훈입니다.',
+  language: 'ko-kr',
   theme: 'system', // system, dark or light
-  siteUrl: 'https://tailwind-nextjs-starter-blog.vercel.app',
-  siteRepo: 'https://github.com/timlrx/tailwind-nextjs-starter-blog',
-  siteLogo: `${process.env.BASE_PATH || ''}/static/images/logo.png`,
-  socialBanner: `${process.env.BASE_PATH || ''}/static/images/twitter-card.png`,
-  mastodon: 'https://mastodon.social/@mastodonuser',
-  email: 'address@yoursite.com',
-  github: 'https://github.com',
-  x: 'https://twitter.com/x',
-  // twitter: 'https://twitter.com/Twitter',
-  facebook: 'https://facebook.com',
-  youtube: 'https://youtube.com',
-  linkedin: 'https://www.linkedin.com',
-  threads: 'https://www.threads.net',
-  instagram: 'https://www.instagram.com',
-  medium: 'https://medium.com',
-  bluesky: 'https://bsky.app/',
-  locale: 'en-US',
+  siteUrl: 'https://juimwonsa.github.io', // 본인 저장소 주소로 변경
+  siteRepo: 'https://github.com/juimwonsa/juimwonsa.github.io',
+  siteLogo: '/static/images/logo.png',
+  socialBanner: '/static/images/twitter-card.png',
+  email: 'fnaticisop@kakao.com', // 이메일 주소 입력
+  github: 'https://github.com/juimwonsa',
+  locale: 'ko-KR',
+
   // set to true if you want a navbar fixed to the top
   stickyNav: false,
   analytics: {
