@@ -7,6 +7,12 @@ interface Project {
 
 const projectsData = [
   {
+    title: '기업용 ERP 시스템 (Flutter App)',
+    description: `2025년 7월부터 현재까지 진행 중인 프로젝트입니다. Dart 언어를 처음 접했음에도 빠르게 기술을 습득하여 고객사의 복잡한 기능 요구사항을 성공적으로 구현하고 있습니다. 특히 백엔드 팀과의 유기적인 소통을 주도하여 API 연동 프로세스를 최적화했으며, 안정적인 모바일/웹 ERP 환경을 구축하는 데 기여하고 있습니다.`,
+    imgSrc: '/static/images/project/flutter-erp.png', // 스크린샷 필요
+    href: '#', // 사내 시스템인 경우 '#'
+  },
+  {
     title: '사내 통합 회원 및 라이선스 관리 시스템',
     description: `Node.js와 Firebase를 활용하여 수십~수백 명 규모의 사내 프로그램 사용자를 위한 통합 인증 및 라이선스 관리 서버를 구축했습니다. API 설계를 통해 3개의 프로그램과 연동되는 중앙화된 시스템을 구현하여 유지보수 효율을 높였습니다.`,
     imgSrc: '/static/images/project/license.png', // 대표 이미지 (나중에 넣으세요)
