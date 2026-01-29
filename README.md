@@ -42,12 +42,3 @@
 
 - **npm vs yarn: 차이점과 무엇을 써야 할까?** (Yarn Berry & PnP 도입기)
 - _...and more to come!_
-
-## 🚀 Getting Started
-
-이 프로젝트를 로컬 환경에서 실행하려면 다음 명령어를 사용하세요.
-
-```bash
-# 1. 저장소 클론
-git clone [https://github.com/juimwonsa/juimwonsa.github](https://github.com/juimwonsa/juimwonsa.github).
-```

@@ -14,7 +14,7 @@ const projectsData = [
   },
   {
     title: '사내 통합 회원 및 라이선스 관리 시스템',
-    description: `Node.js와 Firebase를 활용하여 수십~수백 명 규모의 사내 프로그램 사용자를 위한 통합 인증 및 라이선스 관리 서버를 구축했습니다. API 설계를 통해 3개의 프로그램과 연동되는 중앙화된 시스템을 구현하여 유지보수 효율을 높였습니다.`,
+    description: `Node.js와 Firebase(Firestore, Cloud Functions)를 활용하여 중앙화된 라이선스 관리 서버를 구축했습니다. Cafe24 OAuth 기반의 관리자 인증을 구현하여 보안을 강화했고, db.batch()를 활용한 대용량 라이선스 키 일괄 등록 시스템을 개발했습니다. 또한, 신규 게임 런칭 시 코드 변경을 최소화할 수 있는 확장 가능한 아키텍처를 설계하여 유지보수 효율을 높였습니다.`,
     imgSrc: '/static/images/project/license.png', // 대표 이미지 (나중에 넣으세요)
     href: '#', // 사내 시스템이라 링크가 없다면 '#' 또는 회사 홈페이지 주소
   },
