@@ -8,37 +8,37 @@ interface Project {
 const projectsData = [
   {
     title: '기업용 ERP 시스템 (Flutter App)',
-    description: `2025년 7월부터 현재까지 진행 중인 프로젝트입니다. Dart 언어를 처음 접했음에도 빠르게 기술을 습득하여 고객사의 복잡한 기능 요구사항을 성공적으로 구현하고 있습니다. 특히 백엔드 팀과의 유기적인 소통을 주도하여 API 연동 프로세스를 최적화했으며, 안정적인 모바일/웹 ERP 환경을 구축하는 데 기여하고 있습니다.`,
-    imgSrc: '/static/images/project/flutter-erp.png', // 스크린샷 필요
-    href: '#', // 사내 시스템인 경우 '#'
+    description: `Dart/Flutter 도입 후 2주 만에 실무 개발에 착수하여 프로젝트를 주도했습니다. 백엔드 팀과의 협업을 통해 REST API 규격을 표준화함으로써 데이터 연동 오류를 획기적으로 줄였으며, 모바일과 웹을 동시에 지원하는 멀티 플랫폼 ERP 환경을 구축했습니다.`,
+    imgSrc: '/static/images/project/flutter-erp.png',
+    href: '#',
   },
   {
     title: '사내 통합 회원 및 라이선스 관리 시스템',
-    description: `Node.js와 Firebase(Firestore, Cloud Functions)를 활용하여 중앙화된 라이선스 관리 서버를 구축했습니다. Cafe24 OAuth 기반의 관리자 인증을 구현하여 보안을 강화했고, db.batch()를 활용한 대용량 라이선스 키 일괄 등록 시스템을 개발했습니다. 또한, 신규 게임 런칭 시 코드 변경을 최소화할 수 있는 확장 가능한 아키텍처를 설계하여 유지보수 효율을 높였습니다.`,
-    imgSrc: '/static/images/project/license.png', // 대표 이미지 (나중에 넣으세요)
-    href: '#', // 사내 시스템이라 링크가 없다면 '#' 또는 회사 홈페이지 주소
+    description: `Firebase Firestore의 db.batch()를 활용하여 대량의 라이선스 키 일괄 등록 기능을 구현, 수동 작업 대비 등록 효율을 극대화했습니다. 중앙화된 인증 서버 구축을 통해 사내 3개 이상의 연동 프로그램에 대한 보안 관리 및 라이선스 정책을 통합 운영할 수 있도록 설계했습니다.`,
+    imgSrc: '/static/images/project/license.png',
+    href: '#',
   },
   {
     title: 'Unreal Engine SSO 인증 서버',
-    description: `Unreal Engine 클라이언트와 Cafe24 계정을 연동하는 OAuth 2.0 기반 SSO 시스템입니다. Node.js 백엔드에서 보안 인증 플로우를 직접 구현하고, Webhook을 통해 결제 상태에 따른 실시간 라이선스 제어 기능을 개발했습니다.`,
+    description: `Unreal Engine 클라이언트와 Cafe24 계정 간의 OAuth 2.0 SSO 인증 시스템을 독자 구축했습니다. Webhook 기반의 실시간 라이선스 제어 로직을 통해 결제 상태에 따른 권한 부여를 자동화하여 운영 리소스를 절감하고 보안성을 강화했습니다.`,
     imgSrc: '/static/images/project/unreal-sso.png',
     href: '#',
   },
   {
     title: 'LS산전 Solution Square',
-    description: `Spring Boot(JPA, QueryDSL) 백엔드와 React, TypeScript 프론트엔드를 모두 담당한 풀스택 프로젝트입니다. 기존 정적 페이지를 동적인 SPA로 전환하고, 복잡한 검색 필터링 기능을 최적화하여 사용자 경험을 개선했습니다.`,
+    description: `React/TypeScript 기반의 SPA 전환을 통해 기존 정적 페이지 대비 사용자 인터랙션 속도를 개선했습니다. 특히 QueryDSL을 활용한 동적 쿼리 최적화로 복잡한 조건의 검색 성능을 향상시켜 대규모 데이터 환경에서도 원활한 탐색 경험을 제공했습니다.`,
     imgSrc: '/static/images/project/ls-electric.png',
-    href: 'https://ssq.ls-electric.com', // 실제 서비스 중인 사이트라면 주소 입력
+    href: 'https://ssq.ls-electric.com',
   },
   {
     title: '곤지암 리조트 로봇 관제 시스템',
-    description: `MQTT 프로토콜을 활용하여 리조트 내 로봇의 실시간 위치를 관제하고 명령을 전송하는 웹 시스템입니다. Node.js와 Prisma, MySQL을 사용하여 시설물 데이터 관리 백엔드를 구축하고 반응형 대시보드를 구현했습니다.`,
+    description: `MQTT 프로토콜을 활용한 저지연(Low-latency) 실시간 로봇 관제 시스템입니다. Prisma와 MySQL을 연동하여 리조트 내 수백 개의 시설물 위치 데이터를 관리하고, 실시간 상태 정보를 대시보드에 시각화하여 관제 효율성을 높였습니다.`,
     imgSrc: '/static/images/project/robot.png',
     href: '#',
   },
   {
     title: '전북TP 불법 어업 모니터링 시스템',
-    description: `Figma를 활용한 UI 프로토타이핑부터 실제 웹 프론트엔드 구현까지 담당했습니다. 사용자 중심의 직관적인 대시보드 인터페이스를 설계하여 모니터링 효율성을 높였습니다.`,
+    description: `Figma를 활용한 UI/UX 설계부터 프론트엔드 구현까지 담당했습니다. 모니터링 요원의 워크플로우를 분석하여 정보 접근성을 개선한 대시보드를 구축했으며, 데이터 시각화를 통해 불법 어업 탐지 가독성을 높여 현장 대응력을 개선했습니다.`,
     imgSrc: '/static/images/project/monitoring.png',
     href: '#',
   },
