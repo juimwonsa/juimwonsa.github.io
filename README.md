@@ -1,7 +1,7 @@
 # Kim Hee-hoon | Full Stack Developer
 
 [![Website](https://img.shields.io/website?url=https%3A%2F%2Fjuimwonsa.github.io&label=juimwonsa.github.io&logo=github)](https://juimwonsa.github.io)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Blue?logo=typescript)](https://www.typescriptlang.org/)
 
@@ -17,12 +17,13 @@
 
 이 블로그는 최신 웹 기술을 활용하여 성능과 사용자 경험을 최적화했습니다.
 
-- **Framework**: [Next.js 14 (App Router)](https://nextjs.org/)
+- **Framework**: [Next.js 15 (App Router)](https://nextjs.org/)
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
 - **Font**: [Pretendard](https://github.com/orioncactus/pretendard) (가독성 최적화)
 - **Content**: [Contentlayer](https://www.contentlayer.dev/) (MDX 기반 포스팅)
 - **Deployment**: GitHub Pages (GitHub Actions)
-- **Analytics & Comments**: Giscus, Google Analytics
+- **Search**: kbar (사이트 내 글 검색)
+- **Automation**: 매일 아침 최신 IT 소식 글 자동 게시 (`IT 소식` 메뉴)
 
 ## 📂 Key Projects
 

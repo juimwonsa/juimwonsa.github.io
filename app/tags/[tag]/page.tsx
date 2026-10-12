@@ -2,6 +2,7 @@ import { slug } from 'github-slugger'
 import { allCoreContent, sortPosts } from 'pliny/utils/contentlayer'
 import siteMetadata from '@/data/siteMetadata'
 import ListLayout from '@/layouts/ListLayoutWithTags'
+import { NEWS_TAG_SLUG, NEWS_TITLE } from '@/data/postFilters'
 import { allBlogs } from 'contentlayer/generated'
 import tagData from 'app/tag-data.json'
 import { genPageMetadata } from 'app/seo'
@@ -15,7 +16,7 @@ export async function generateMetadata(props: {
   const params = await props.params
   const tag = decodeURI(params.tag)
   return genPageMetadata({
-    title: tag,
+    title: tag === NEWS_TAG_SLUG ? NEWS_TITLE : tag,
     description: `${siteMetadata.title} ${tag} tagged content`,
     alternates: {
       canonical: './',
@@ -37,7 +38,8 @@ export const generateStaticParams = async () => {
 export default async function TagPage(props: { params: Promise<{ tag: string }> }) {
   const params = await props.params
   const tag = decodeURI(params.tag)
-  const title = tag[0].toUpperCase() + tag.split(' ').join('-').slice(1)
+  const title =
+    tag === NEWS_TAG_SLUG ? NEWS_TITLE : tag[0].toUpperCase() + tag.split(' ').join('-').slice(1)
   const filteredPosts = allCoreContent(
     sortPosts(allBlogs.filter((post) => post.tags && post.tags.map((t) => slug(t)).includes(tag)))
   )
