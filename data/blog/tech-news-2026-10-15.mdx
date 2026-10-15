@@ -1,0 +1,119 @@
+---
+title: '오늘의 IT 소식: Next.js·React 긴급 보안 패치, GitHub Actions 워크플로 락파일, Gemini 4 Argon 정식 출시, 역대 최대 Patch Tuesday'
+date: '2026-10-15'
+tags: ['IT-News', 'Next.js', 'React', 'Security', 'GitHub', 'AI-Agent']
+draft: false
+summary: '인증 없이 원격 코드 실행이 가능한 취약점 두 건을 막은 Next.js 16.4.1과 15.5.28, 태그가 움직여도 같은 커밋을 실행하게 해 주는 GitHub Actions 락파일, 개발자에게 열린 Google Gemini 4 Argon, 그리고 1,400건이 넘는 수정이 담긴 Microsoft 10월 보안 업데이트를 정리합니다.'
+---
+
+지난 10월 13일 글에서 예고해 드렸던 Next.js 보안 업데이트가 예정대로 10월 14일에 나왔습니다. 내용이 예상보다 무겁습니다. 여기에 공급망 공격을 막는 GitHub Actions의 새 기능, Google의 새 프런티어 모델 정식 출시, Microsoft의 기록적인 월간 패치까지 네 가지를 정리했습니다.
+
+## 1. Next.js 16.4.1 / 15.5.28: 인증 없는 RCE 두 건과 DoS 한 건
+
+### 무엇이 나왔나
+
+Vercel은 10월 8일 "다음 주 수요일에 업스트림 의존성 관련 Critical 2건, High 1건을 고치는 긴급 업데이트를 내겠다"고 예고했고, 10월 14일 **Next.js 16.4.1과 15.5.28**을 배포했습니다. React 팀도 같은 날 관련 권고와 함께 **19.0.9, 19.1.10, 19.2.9, 19.3.1**을 내놓았습니다.
+
+| 취약점 | 심각도 | 영향 범위 | 수정 버전 |
+| --- | --- | --- | --- |
+| Image Optimization API를 통한 원격 코드 실행 (CVE-2026-96889) | Critical | `next` 10.0.0 ~ 15.5.27, 16.0.0 ~ 16.4.0 | 15.5.28, 16.4.1 (+ sharp 0.35.5) |
+| `use cache` 함수가 여러 typed array를 반환할 때의 원격 코드 실행 | Critical | 16.0.0 ~ 16.4.0 | 16.4.1 |
+| Server Actions에 조작된 요청을 보내 CPU를 점유하는 DoS | High | 13.0.0 ~ 15.5.27, 16.0.0 ~ 16.4.0 | 15.5.28, 16.4.1 |
+
+- **이미지 최적화 RCE**: 원인은 Next.js가 이미지 처리에 쓰는 sharp, 그 안에 포함된 SVG 렌더링 라이브러리 librsvg의 메모리 버그입니다. 조작된 SVG가 처리되면 서버에서 코드가 실행될 수 있고, 권고상 glibc 기반 Linux에서 셀프 호스팅하는 경우가 주 대상입니다. 수정은 sharp 0.35.5(librsvg 2.63.2 포함)에 들어 있습니다.
+- **`use cache` RCE**: App Router에서 Cache Components를 쓰고, 캐시 함수가 여러 typed array와 공격자가 조작할 수 있는 값을 함께 돌려주는 드문 조건에서 발생합니다. React Server Components 직렬화 쪽 문제라 React에도 같은 권고가 나왔고, 우회책은 없습니다.
+- **Server Actions DoS**: Pages Router만 쓰거나 App Router여도 Server Actions가 없는 앱은 해당되지 않습니다.
+
+현재까지 실제 악용 사례는 보고되지 않았습니다.
+
+### 꼭 확인할 함정: sharp가 따라 올라오지 않을 수 있다
+
+15.5.28은 sharp 의존성 범위를 `^0.34.3 || ^0.35.5`로 선언합니다. 그래서 락파일에 이미 sharp 0.34.x가 잡혀 있으면 Next.js만 올라가고 **취약한 sharp는 그대로 남을 수 있습니다.** 0.34 계열에는 수정 버전이 없으므로 sharp를 직접 올려 두는 편이 안전합니다.
+
+```bash
+npm install next@16.4.1   # 15.x라면 next@15.5.28
+npm ls next sharp         # sharp가 0.35.5 이상인지 확인
+```
+
+```json
+// package.json: 하위 의존성까지 sharp를 강제하고 싶을 때
+{
+  "overrides": {
+    "sharp": "0.35.5"
+  }
+}
+```
+
+pnpm이라면 `pnpm.overrides`에 같은 내용을 넣으면 됩니다. React를 직접 RSC 번들러(`react-server-dom-webpack` 등)와 함께 쓰는 경우가 아니라면, Next.js 사용자는 React가 아니라 `next`를 올리는 것으로 충분합니다. App Router는 Next.js에 포함된 React 빌드를 쓰기 때문입니다. 14.x 이하는 이번 수정 대상에 없으므로 최소한 sharp를 고정하고 15.5.28 이상으로 옮길 계획을 세워야 합니다.
+
+## 2. GitHub Actions 워크플로 락파일 공개 프리뷰
+
+### 왜 필요한가
+
+워크플로에서 `actions/checkout@v6`처럼 태그로 액션을 참조하면, 리뷰할 때 본 코드와 나중에 실제로 실행되는 코드가 다를 수 있습니다. 태그나 브랜치는 언제든 다른 커밋으로 옮길 수 있기 때문입니다. 지금까지는 SHA를 직접 박아 넣는 것이 거의 유일한 대책이었고, 그마저도 액션 내부가 다시 참조하는 하위 액션까지는 막지 못했습니다.
+
+GitHub가 10월 14일 공개 프리뷰로 내놓은 **워크플로 락파일**은 npm의 `package-lock.json`과 같은 발상입니다. 워크플로 파일에는 태그를 그대로 두고, 실제 실행 커밋은 `.github/workflows/actions.lock`에 기록합니다.
+
+- 액션과 그 **하위(transitive) 의존성**, 재사용 워크플로까지 커밋 단위로 고정합니다.
+- 락파일에 등록된 워크플로는 모든 의존성에 항목이 있어야 하며, 태그가 움직여도 기록된 커밋을 실행합니다.
+- 관리자는 **Require lockfile** 정책으로 엔터프라이즈·조직·저장소 단위에서 락파일을 강제할 수 있습니다.
+- Dependabot이 액션 버전을 올릴 때 같은 PR에서 락파일 항목도 함께 갱신합니다.
+
+### 사용법
+
+GitHub CLI 확장으로 생성합니다.
+
+```bash
+gh extension install github/gh-actions-lock
+
+gh actions-lock                            # 모든 워크플로를 고정하고 락파일 생성
+gh actions-lock .github/workflows/ci.yml   # 워크플로 하나만 등록
+gh actions-lock --relock                   # 태그가 정상적으로 옮겨졌을 때 다시 고정
+```
+
+생성 후에는 diff를 꼭 확인해야 합니다. `@v3`가 `@v3.1.0` 같은 구체적인 버전으로 바뀌고, 저장소 안의 로컬 액션 참조 표기도 바뀝니다. 락파일 리뷰에서 커밋 값이 바뀌었다면 실행 코드가 바뀐 것이고, 저장소 ID가 바뀌었다면 같은 이름의 **다른 저장소**라는 뜻이므로 바로 의심해야 합니다. 어제 다룬 npm SlugFest와 정확히 같은 종류의 위험을 잡아 주는 장치입니다.
+
+### 주의점
+
+- 현재는 **GitHub Enterprise Cloud** 대상 프리뷰입니다. 개인 저장소나 일반 조직에서 바로 쓸 수 있는 기능은 아직 아닙니다.
+- 락파일은 "검토한 그 코드를 실행한다"를 보장할 뿐, 그 코드가 안전하다는 뜻은 아닙니다. 고정하기 전 검토는 여전히 필요합니다.
+- 같은 주에 GitHub는 Anthropic API 키를 시크릿 스캐닝 푸시 보호에서 **기본 차단**하도록 바꿨습니다. 시크릿 스캐닝이 켜진 저장소라면 무료 공개 저장소도 해당되니, AI 에이전트 실험 코드에 키를 하드코딩하던 습관이 있다면 이번 기회에 환경 변수로 옮기는 것이 좋습니다.
+
+## 3. Google Gemini 4 Argon, 개발자에게 정식 공개
+
+Google이 9월 30일 일부 사이버 보안 파트너에게만 먼저 제공했던 **Gemini 4 Argon**을 10월 13일 일반 개발자와 기업, 유료 구독자에게 열었습니다. 한동안 차기 Pro 모델 출시가 지연되며 경쟁에서 밀린다는 평가를 받던 Google의 반격 카드입니다.
+
+- **어디서 쓰나**: Gemini API(유료 티어, AI Studio), Google Cloud의 기업용 플랫폼, Gemini 앱, Antigravity 등. 모델 ID는 `gemini-4-argon`입니다. 무료 티어 API에서는 쓸 수 없습니다.
+- **가격**: 보도에 따르면 11월 30일까지 입력 100만 토큰당 2달러, 출력 10달러의 출시 기념가이고, 12월 1일부터 4달러와 20달러로 오릅니다. thinking 토큰도 출력으로 과금됩니다. **지금 비용을 측정해 예산을 잡으면 12월에 두 배가 된다**는 점을 기억해 두세요.
+- **컨텍스트**: 입력과 출력, thinking을 합쳐 약 100만 토큰을 공유합니다. 어려운 요청은 수 분이 걸릴 수 있어, Google은 백그라운드 처리와 넉넉한 HTTP 타임아웃을 권장합니다.
+- **GitHub Copilot**: 같은 날 Copilot에도 정식 추가됐습니다. Pro+, Max, Business, Enterprise 플랜에서 VS Code, Copilot CLI, 코딩 에이전트 등의 모델 선택기로 고를 수 있고, 사용량 기반 과금으로 제공자 정가가 적용됩니다.
+
+Google은 자체 벤치마크에서 다수 항목이 경쟁 최상위 모델보다 앞선다고 주장하지만, 터미널 작업 같은 일부 코딩 벤치마크에서는 뒤진다는 결과도 함께 공개했습니다. 결국 판단 기준은 내 코드베이스입니다. 요청 타임아웃이 짧게 잡힌 서버리스 함수에서 호출한다면, 모델만 바꿨다가 타임아웃 오류를 만나기 쉬우니 구조부터 점검하는 것이 좋습니다.
+
+## 4. Microsoft 10월 Patch Tuesday: 1,411건, 제로데이 3건
+
+Microsoft가 10월 13일 배포한 월간 보안 업데이트는 Patch Tuesday 당일 기준으로만 **약 1,411건**의 취약점을 고친 역대 최대 규모입니다. 이 중 70건이 Critical입니다. BleepingComputer는 Microsoft가 AI 도구로 취약점을 찾고 고치는 작업을 늘린 것을 원인으로 꼽았습니다.
+
+- **실제 악용 중인 제로데이**: Windows Shell의 보안 기능 우회 취약점(CVE-2026-96951)으로, 인터넷에서 받은 파일에 붙는 **Mark of the Web 경고를 우회**할 수 있습니다. 내려받은 파일을 열 때 뜨는 경고가 사라진다는 뜻이라, 피싱 첨부 파일과 결합되기 쉽습니다.
+- **공개된 제로데이 2건**: Windows Defender Application Control을 우회할 수 있는 .NET Framework 취약점, 그리고 MessagePack-CSharp의 DoS 취약점입니다.
+- **개발자 관련**: .NET과 ASP.NET Core 관련 수정이 40여 건으로 가장 큰 묶음이고, Visual Studio, Azure DevOps, Microsoft의 Linux 배포판 Mariner에 포함된 Git, Docker Engine, BuildKit, Go `net/http` 패키지 등도 포함됐습니다.
+
+Windows에서 개발하거나 Windows용 Electron 앱을 배포한다면 이번 업데이트는 미루지 않는 것이 좋습니다. 사용자 입장에서 Mark of the Web 경고는 "모르는 실행 파일"을 거르는 마지막 안전장치 중 하나이고, 코드 서명이 된 정상 앱이 이 장치 덕분에 신뢰를 얻는 구조이기도 합니다. .NET 기반 백엔드나 빌드 도구를 함께 운영하고 있다면 런타임과 SDK 업데이트도 같이 챙기세요.
+
+## 마무리
+
+오늘 소식을 관통하는 키워드는 **"내가 고른 버전이 실제로 실행되고 있는가"**입니다. Next.js를 올려도 sharp는 옛 버전에 머물 수 있고, 워크플로의 태그는 리뷰 이후에 움직일 수 있습니다. 업그레이드 명령을 친 뒤 `npm ls`나 락파일 diff로 결과를 한 번 더 확인하는 습관이 생각보다 많은 사고를 막아 줍니다.
+
+## 참고 자료
+
+- [Upcoming Next.js Security Update for Upstream Vulnerabilities (Next.js 블로그)](https://nextjs.org/blog/upcoming-nextjs-security-update-october-2026)
+- [Next.js 16.4.1 and 15.5.28 fix two unauthenticated RCEs (HOL)](https://hol.org/blog/cve-2026-96889-nextjs-october-2026-security-update-rce)
+- [Next.js Security Advisories (GitHub)](https://github.com/vercel/next.js/security/advisories)
+- [React Security Advisories (GitHub)](https://github.com/facebook/react/security/advisories)
+- [GitHub Actions workflow lockfiles in public preview (GitHub Changelog)](https://github.blog/changelog/2026-10-14-github-actions-workflow-lockfiles-in-public-preview)
+- [Lock workflow dependencies (GitHub Docs)](https://docs.github.com/en/actions/how-tos/secure-your-work/lock-workflow-dependencies)
+- [Secret scanning blocks Anthropic keys by default, adds Salesforce (GitHub Changelog)](https://github.blog/changelog/2026-10-13-secret-scanning-blocks-anthropic-keys-by-default-adds-salesforce)
+- [Gemini 4 Argon in GitHub Copilot (GitHub Changelog)](https://github.blog/changelog/2026-10-13-gemini-4-argon-in-github-copilot)
+- [Google Releases Gemini 4 Argon API (MarkTechPost)](https://www.marktechpost.com/2026/10/13/google-gemini-4-argon-api-release/)
+- [Gemini 4 Argon is now on sale, and its introductory price ends on November 30 (The Decoder)](https://mixed-news.com/en/gemini-4-argon-generally-available-introductory-price-ends-november-30/)
+- [Microsoft October 2026 Patch Tuesday fixes 1,411 flaws, 3 zero-days (BleepingComputer)](https://www.bleepingcomputer.com/news/microsoft/microsoft-october-2026-patch-tuesday-fixes-1-411-flaws-3-zero-days/)
