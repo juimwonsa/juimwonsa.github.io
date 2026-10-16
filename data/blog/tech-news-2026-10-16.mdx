@@ -1,0 +1,140 @@
+---
+title: '오늘의 IT 소식: Node.js 10월 21일 보안 릴리스 예고, Langflow MCP 설정 RCE 악용, OpenAI GPT-4o·GPT-4.1 API 종료 예고, Claude Platform OpenTelemetry'
+date: '2026-10-16'
+tags: ['IT-News', 'Node.js', 'Security', 'AI-Agent', 'Backend']
+draft: false
+summary: '26.x, 24.x, 22.x 모두에 High 등급 수정이 예고된 Node.js 보안 릴리스와 새 릴리스 일정, MCP 서버 설정 하나로 서버 명령을 실행할 수 있는 Langflow 취약점의 실제 악용, 2027년 1월 API에서 사라지는 GPT-4o와 GPT-4.1, 그리고 Claude API 호출을 기존 관측 도구로 추적하게 해 주는 OpenTelemetry 내보내기 베타를 정리합니다.'
+---
+
+이번 주는 보안 패치 소식이 유난히 많았습니다. 오늘은 Node.js를 쓰는 모든 서버에 해당하는 보안 릴리스 예고를 먼저 짚고, AI 에이전트 도구에서 MCP 설정이 공격 경로가 된 사례, 그리고 LLM API를 쓰는 서비스라면 일정표에 적어 둬야 할 모델 종료 소식과 관측(Observability) 기능까지 네 가지를 정리했습니다.
+
+## 1. Node.js, 10월 21일 보안 릴리스 예고와 새 릴리스 일정
+
+### 무엇이 예고됐나
+
+Node.js 프로젝트가 **10월 21일(수, 미국 기준) 또는 그 직후**에 보안 릴리스를 내겠다고 공지했습니다. 대상은 현재 지원 중인 세 라인 전부입니다.
+
+| 릴리스 라인 | 가장 높은 심각도 |
+| --- | --- |
+| 26.x | High |
+| 24.x | High |
+| 22.x | High |
+
+취약점 개수와 내용은 아직 공개되지 않았습니다. 늘 그렇듯 지원이 끝난(EOL) 버전은 영향을 받는 것으로 간주되고 패치도 나오지 않습니다. 아직 Node 20 이하에서 돌아가는 서비스나 빌드 서버가 있다면, 이번 릴리스는 지원 버전으로 올라갈 명분이 됩니다.
+
+### 지금 해 둘 일
+
+- **버전 확인부터**: 서버, CI 러너, Docker 베이스 이미지, Electron 앱이 쓰는 Node 버전을 한 번에 정리해 두면 패치가 나온 날 바로 움직일 수 있습니다.
+- **이미지 태그 점검**: `node:22`처럼 메이저 태그만 쓰는 Dockerfile은 다시 빌드하면 새 패치를 받지만, 특정 패치 버전으로 고정해 둔 경우에는 직접 올려야 합니다.
+- **Electron은 별도**: Electron 앱은 시스템 Node가 아니라 Electron에 내장된 Node를 씁니다. Node.js 보안 릴리스가 나와도 Electron 쪽 업데이트를 따로 기다려야 하니, 내장 버전을 확인해 두세요.
+
+```bash
+node -v                      # 로컬, 서버
+docker run --rm node:22 node -v   # 베이스 이미지가 가리키는 실제 버전
+npx electron --version       # Electron 버전 (내장 Node는 릴리스 노트에서 확인)
+```
+
+### 함께 알아 둘 것: 1년에 메이저 한 번
+
+Node.js는 올해 공지한 대로 **Node.js 27부터 메이저 릴리스를 1년에 한 번(4월)**으로 줄입니다. 홀수·짝수 구분이 사라지고 모든 메이저가 LTS가 되며, 버전 번호는 처음 Current가 되는 연도를 따라갑니다(2027년의 27, 2028년의 28). 대신 10월부터 3월까지 운영되는 **Alpha 채널**이 생겨, 예전 홀수 버전이 하던 "미리 써 보기" 역할을 맡습니다. Node.js 27의 Alpha가 바로 이번 달 시작되고, Node.js 26은 기존 방식의 마지막 라인으로 이번 10월에 LTS에 들어갑니다.
+
+라이브러리를 배포하고 있다면 CI 매트릭스에 Alpha 빌드를 추가해 두는 것을 프로젝트가 직접 권장하고 있습니다. LTS에서만 테스트하면 호환성 문제를 사용자가 먼저 발견하게 되기 때문입니다. 단, Alpha는 API가 바뀔 수 있어 운영 환경에서 쓰면 안 됩니다.
+
+## 2. Langflow, MCP 서버 설정 하나로 서버 명령 실행: 실제 공격 진행 중
+
+### 무엇이 문제인가
+
+드래그 앤 드롭으로 LLM 워크플로와 에이전트를 만드는 오픈소스 도구 **Langflow**에서 CVSS 9.9의 원격 코드 실행 취약점(**CVE-2026-105740**)이 공개됐고, 실제 공격 시도가 관측되고 있습니다. 영향 범위는 **1.9.0 미만 전체**이며 1.9.0에서 고쳐졌습니다.
+
+원리는 단순합니다. Langflow에 MCP 서버를 stdio 방식으로 등록할 때 입력하는 `command` 값이 아무 검증 없이 셸로 넘어가 실행됩니다. 로그인만 할 수 있으면 관리자가 아니어도 누구나 서버 권한으로 명령을 실행할 수 있다는 뜻입니다.
+
+- `env` 필드로 `LD_PRELOAD`나 `PATH` 같은 환경 변수를 주입할 수도 있습니다.
+- 악성 설정은 저장된 채로 남아, 서버 목록을 불러올 때마다 다시 실행됩니다. 사실상 백도어입니다.
+- MCP 설정은 프로젝트 설정 안에 있어서, 평소처럼 플로우만 검토해서는 눈에 띄지 않습니다.
+
+보안 업체 Previdian의 허니팟에는 9월 19일 이후 27개 IP에서 1,423건의 공격 시도가 기록됐고, 10월 11일 이후 시도가 눈에 띄게 늘었다고 합니다. 지난달 고쳐진 비슷한 명령 주입 취약점(CVE-2026-105697)도 같은 MCP stdio 설정 경로였습니다.
+
+### 개발자에게 왜 중요한가
+
+Langflow를 쓰지 않더라도 이 사례는 남의 일이 아닙니다. **stdio MCP 서버 설정은 본질적으로 "이 명령을 실행하라"는 지시**입니다. 에이전트 도구나 사내 AI 플랫폼을 만들면서 사용자가 MCP 서버를 추가하는 기능을 열어 둔다면, 그 기능은 곧 서버에서 임의 프로세스를 띄우는 기능과 같습니다.
+
+```ts
+// 피해야 할 패턴: 사용자 입력을 셸 문자열로 실행
+// spawn('bash', ['-c', `exec ${userCommand}`])
+
+// 최소한의 방어: 허용 목록 + 셸을 거치지 않는 실행
+const ALLOWED = new Set(['npx', 'uvx'])
+if (!ALLOWED.has(cfg.command)) throw new Error('허용되지 않은 MCP 명령')
+spawn(cfg.command, cfg.args, { shell: false, env: { PATH: SAFE_PATH } })
+```
+
+허용 목록을 둬도 `npx`로 아무 패키지나 실행할 수 있다면 우회가 가능하므로, 결국 **누가 MCP 서버를 추가할 수 있는지** 권한부터 좁히는 것이 핵심입니다.
+
+### 바로 할 일
+
+- Langflow를 운영 중이라면 즉시 **1.9.0 이상**으로 올립니다.
+- 바로 올릴 수 없다면 `LANGFLOW_AUTO_LOGIN=false`로 자동 로그인을 끄고, 신뢰할 수 없는 네트워크에 노출하지 말고, 계정을 신뢰할 수 있는 사용자로 제한합니다.
+- 이미 인터넷에 노출돼 있었다면 등록된 MCP 서버 설정을 전부 확인하고, 그 서버에서 접근 가능했던 API 키와 자격 증명을 교체하는 편이 안전합니다.
+
+## 3. OpenAI, GPT-4o와 GPT-4.1을 2027년 1월 14일 API에서 종료
+
+OpenAI가 10월 14일 GPT-4 계열 모델의 API 종료 일정을 공지했습니다. **2027년 1월 14일**에 아래 스냅샷이 API에서 제거되며, 공식 대체 모델은 모두 `gpt-6-luna`입니다.
+
+| 모델 | 스냅샷 |
+| --- | --- |
+| GPT-4o | `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20` |
+| GPT-4o mini | `gpt-4o-mini-2024-07-18` |
+| GPT-4.1 | `gpt-4.1-2025-04-14` |
+| GPT-4.1 mini | `gpt-4.1-mini-2025-04-14` |
+
+이 모델들로 파인튜닝한 모델도 같은 날 함께 사라집니다. 같은 날 ChatGPT와 Codex에서는 GPT-5.5가 내려갔지만, 이쪽은 API 접근에는 변화가 없습니다.
+
+### 일정표에 같이 적어 둘 날짜
+
+GPT-4o mini는 저렴해서 분류, 요약, 태깅 같은 백그라운드 작업에 박혀 있는 경우가 많습니다. 이번 공지와 별개로 이미 예고된 종료 일정도 연말에 몰려 있으니 함께 확인해 두세요.
+
+- **10월 23일**: `gpt-4-turbo`, `gpt-4.1-nano`, `gpt-4o-2024-05-13`, `o1`, `o3-mini`, `o4-mini`, `gpt-image-1` 등 레거시 스냅샷 종료
+- **11월 30일**: Evals 대시보드와 API, Agent Builder, `v1/prompts` API 종료
+- **12월 11일**: `gpt-5-2025-08-07` 등 초기 GPT-5와 o3 스냅샷 종료
+
+특히 10월 23일은 다음 주입니다. 코드베이스에서 모델 ID를 한 번 검색해 보는 것만으로도 갑작스러운 오류를 막을 수 있습니다.
+
+```bash
+# 저장소 전체에서 종료 예정 모델 ID 찾기
+grep -rnE "gpt-4o|gpt-4\.1|gpt-4-turbo|o3-mini|o4-mini" --include=*.{ts,js,json,env,py} .
+```
+
+모델 이름을 코드 곳곳에 하드코딩하지 말고 환경 변수나 설정 한 곳에서 관리하면, 이런 공지가 나올 때마다 한 줄만 바꾸면 됩니다. 다만 대체 모델은 응답 형식과 지연 시간, 비용이 다를 수 있으니 출력 파싱에 의존하는 기능은 교체 전에 꼭 회귀 테스트를 돌려 보세요.
+
+## 4. Claude Platform, OpenTelemetry 트레이스 내보내기 공개 베타
+
+Anthropic이 10월 14일 **Claude Platform에서 OpenTelemetry 트레이스를 내보내는 기능**을 공개 베타로 내놓았습니다. Messages API 요청, Claude Managed Agents 세션, Claude SDK의 호출을 이미 쓰고 있는 관측 도구로 보낼 수 있습니다. 트레이스는 OpenTelemetry의 GenAI 시맨틱 컨벤션을 따르므로 다른 LLM 제공자의 데이터와 같은 대시보드에 나란히 놓을 수 있습니다.
+
+### 두 가지 경로
+
+- **API(서버) 측**: 관리자가 Claude Console에서 OTLP/HTTP 엔드포인트와 인증 헤더, 적용할 워크스페이스를 등록합니다. 코드 수정 없이 해당 워크스페이스의 모든 요청에 대해 모델 실행, 서버 도구, MCP 커넥터 도구, 에이전트 턴 단위의 span이 생깁니다.
+- **SDK(클라이언트) 측**: 코드에서 tracer provider를 등록하는 방식으로, 관리자 권한이 필요 없습니다. 클라이언트에서 실행한 도구 호출이나 파일 업로드처럼 서버가 보지 못하는 부분까지 잡히며, 보도에 따르면 TypeScript와 Python을 포함한 7개 언어 SDK가 지원됩니다.
+
+둘을 함께 켜면 SDK span과 API span이 하나의 트레이스로 묶입니다. 내 Node.js 백엔드의 HTTP 요청부터 Claude 모델 호출, 도구 실행까지를 한 화면에서 따라갈 수 있다는 점이 가장 큰 장점입니다.
+
+### 주의점
+
+- **기본값은 메타데이터만**: ID, 시간, 상태, 토큰 수만 나갑니다. 프롬프트와 응답까지 보내는 Full content 모드는 직접 켜야 하고, 켜는 순간 그 내용은 관측 도구 업체의 보관 정책을 따르게 됩니다. 사용자 개인정보가 프롬프트에 섞이는 서비스라면 신중하게 결정해야 합니다.
+- **토큰 이중 집계**: SDK와 API span을 둘 다 받으면 같은 요청의 토큰이 두 번 잡힐 수 있습니다. 한 출처만 합산해야 합니다.
+- **과금·감사 용도로는 부적합**: 베타 단계라 전달이 최선 노력(best effort) 방식이고 유실될 수 있습니다. 비용 정산이나 감사에는 별도의 Usage API를 써야 합니다.
+- Claude Code와 Agent SDK는 별도의 모니터링 문서를 따르므로 이번 기능과는 설정이 다릅니다.
+
+## 마무리
+
+오늘 소식을 묶는 키워드는 **"보이지 않는 곳에 박혀 있는 것들"**입니다. CI 러너의 오래된 Node, 프로젝트 설정 속 MCP 명령, 코드 구석의 모델 ID, 그리고 지금까지 들여다보지 못했던 LLM 호출 내부까지. 패치나 종료 공지가 나왔을 때 허둥대지 않으려면, 평소에 내 시스템이 무엇에 의존하는지 목록으로 보이게 만들어 두는 것이 가장 좋은 준비입니다.
+
+## 참고 자료
+
+- [Wednesday, October 21, 2026 Security Releases (Node.js 블로그)](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+- [Evolving the Node.js Release Schedule (Node.js 블로그)](https://nodejs.org/en/blog/announcements/evolving-the-nodejs-release-schedule)
+- [Langflow Critical Authenticated RCE Flaw Targeted in 1,423 Honeypot Exploit Attempts (The Hacker News)](https://thehackernews.com/2026/10/langflows-critical-authenticated-rce.html)
+- [CVE-2026-105740 (OpenCVE)](https://app.opencve.io/cve/CVE-2026-105740)
+- [Deprecations (OpenAI API 문서)](https://developers.openai.com/api/docs/deprecations)
+- [Anthropic Adds OpenTelemetry Trace Export to the Claude Platform (Unite.AI)](https://www.unite.ai/anthropic-adds-opentelemetry-trace-export-to-the-claude-platform/)
+- [Claude Now Sends OpenTelemetry Traces: What You Can See (Digital Applied)](https://www.digitalapplied.com/blog/claude-opentelemetry-traces-agents)
+- [ClaudeDevs 공지 (X)](https://x.com/ClaudeDevs/status/2110421732029063352)
