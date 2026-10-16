@@ -1,0 +1,60 @@
+# Pages CMS 설정 (https://app.pagescms.org)
+# 브라우저에서 글을 쓰면 이 저장소의 main 브랜치에 커밋되고,
+# GitHub Pages 워크플로가 자동으로 빌드·배포합니다.
+# 저장소에 쓰기 권한이 있는 GitHub 계정만 편집할 수 있습니다.
+
+media:
+  input: public/static/images/blog
+  output: /static/images/blog
+  rename: safe
+  categories: [image]
+
+content:
+  - name: blog
+    label: 블로그 글
+    type: collection
+    path: data/blog
+    format: yaml-frontmatter
+    # 파일 이름이 곧 글 주소(/blog/파일이름)가 됩니다. 새 글을 만들 때 영어 소문자와 하이픈으로 바꿔 주세요.
+    filename:
+      template: "{year}-{month}-{day}-{primary}.mdx"
+      field: create
+    view:
+      primary: title
+      fields: [title, date, draft]
+      sort: date
+      order: desc
+    fields:
+      - name: title
+        label: 제목
+        type: string
+        required: true
+      - name: date
+        label: 작성일
+        type: date
+        required: true
+        options:
+          format: yyyy-MM-dd
+      - name: tags
+        label: 태그
+        type: string
+        list: true
+        description: "예: React, Node.js, TypeScript, AI-Agent (기존 표기를 재사용하세요)"
+      - name: draft
+        label: 임시 저장 (체크하면 사이트에 공개되지 않음)
+        type: boolean
+      - name: summary
+        label: 요약
+        type: text
+        description: 글 목록과 검색 결과에 보이는 한두 문장
+      - name: images
+        label: 대표 이미지
+        type: image
+        list: true
+        description: 링크 공유 시 미리보기에 쓰입니다. 첫 번째 이미지가 사용됩니다.
+      - name: body
+        label: 본문 (MDX)
+        type: code
+        options:
+          format: mdx
+        description: "마크다운으로 작성합니다. 코드 블록 밖에서는 <, {, } 문자를 쓰지 마세요 (빌드 실패 원인). 이미지는 미디어 메뉴에 올린 뒤 ![설명](/static/images/blog/파일명) 으로 넣습니다."
