@@ -39,6 +39,8 @@ jobs:
           EXPORT: 1
           UNOPTIMIZED: 1
           BASE_PATH: ${{ steps.configurepages.outputs.base_path }}
+          # Umami 방문자 통계 Website ID (페이지 HTML에 노출되는 공개 값)
+          NEXT_UMAMI_ID: 989a6030-896e-4410-bf3c-f39d5d40bf5a
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./out
