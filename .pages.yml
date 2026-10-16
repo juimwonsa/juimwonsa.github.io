@@ -53,8 +53,9 @@ content:
         list: true
         description: 링크 공유 시 미리보기에 쓰입니다. 첫 번째 이미지가 사용됩니다.
       - name: body
-        label: 본문 (MDX)
-        type: code
+        label: 본문
+        type: rich-text
         options:
-          format: mdx
-        description: "마크다운으로 작성합니다. 코드 블록 밖에서는 <, {, } 문자를 쓰지 마세요 (빌드 실패 원인). 이미지는 미디어 메뉴에 올린 뒤 ![설명](/static/images/blog/파일명) 으로 넣습니다."
+          format: markdown
+          switcher: true
+        description: "툴바 버튼으로 서식을 넣고, 이미지 버튼으로 바로 업로드할 수 있습니다. 표가 있는 기존 글을 고칠 때는 편집기의 Source 모드로 바꿔서 수정하세요."
