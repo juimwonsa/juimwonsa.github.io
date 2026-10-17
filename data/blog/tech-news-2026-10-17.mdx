@@ -1,0 +1,129 @@
+---
+title: '오늘의 IT 소식: NGINX 보안 패치 5건, GitHub AI Scan과 에이전트 자동 수정 정식 출시, Copilot 모델 정리, CERT-In의 AI 에이전트 경고'
+date: '2026-10-17'
+tags: ['IT-News', 'Security', 'GitHub', 'AI-Agent', 'Backend', 'Firebase']
+draft: false
+summary: '설정 조합에 따라 메모리 손상과 세션 위조가 가능한 버그 다섯 건을 고친 NGINX 1.30.6과 1.31.7, CodeQL이 못 보던 Dockerfile과 셸 스크립트까지 PR에서 검사하는 GitHub AI Scan과 경고를 고쳐 PR까지 열어 주는 에이전트 자동 수정, 11월 16일 Copilot에서 빠지는 모델들, 그리고 노출된 키를 주워 실제 시스템에 들어간 AI 에이전트 사례를 경고한 인도 CERT-In 권고를 정리합니다.'
+---
+
+오늘은 웹 서버 앞단에서 거의 빠지지 않는 NGINX의 보안 릴리스로 시작합니다. 이어서 GitHub가 하루에 정식 출시한 AI 보안 기능 두 가지와 Copilot 모델 정리 일정, 마지막으로 "코드에 남은 키 하나"가 AI 에이전트 시대에 얼마나 빨리 악용되는지 보여 준 인도 CERT-In의 권고를 살펴봅니다.
+
+## 1. NGINX 1.30.6 / 1.31.7: 설정 조합을 타는 보안 버그 다섯 건
+
+### 무엇이 나왔나
+
+NGINX가 10월 14일 안정 버전 **1.30.6**과 메인라인 **1.31.7**을 내고 CVE 다섯 건을 고쳤습니다. NGINX 자체 등급은 모두 Medium이지만, F5는 메모리 손상 계열 세 건에 CVSS v4.0 기준 9.2점을 매겼습니다. 10월 15일 기준으로 실제 공격 보고는 없습니다.
+
+| CVE | 내용 | 문제가 되는 설정 |
+| --- | --- | --- |
+| CVE-2026-15176 | 힙 버퍼 오버플로 | `alias` 쓰는 location에서 `rewrite`로 URI가 바뀐 뒤 파일 경로를 계산할 때 |
+| CVE-2026-93479 | 힙 버퍼 오버플로 | 변수가 들어간 문자열 표현식 평가(정규식 `map` 캡처를 `root`, `log_format`에서 쓰는 경우 등) |
+| CVE-2026-97205 | Use-after-free | `aio`를 켠 상태에서 SSI 페이지가 `include virtual`을 쓸 때 |
+| CVE-2026-95101 | 요청 본문 우회/주입 | HTTP/3 사용 시 알 수 없는 프레임 일부가 본문으로 처리되어 `client_max_body_size` 우회, 백엔드 요청에 데이터 주입 |
+| CVE-2026-97629 | TLS 세션 위조 가능성 | 세션 티켓 키 자동 회전 사용 시 키 하나가 초기화되지 않음 |
+
+### 개발자에게 왜 중요한가
+
+Node.js나 Next.js 서버를 직접 운영한다면 앞에 NGINX를 리버스 프록시로 두는 경우가 많습니다. 이번 버그들은 대부분 "특정 설정을 쓸 때만" 터지기 때문에, 무작정 겁먹기보다 내 설정에 해당 조합이 있는지 먼저 확인하는 것이 효율적입니다.
+
+```bash
+nginx -v                     # 1.30.6 / 1.31.7 이상인지
+nginx -T 2>/dev/null | grep -nE 'alias|rewrite|aio|ssi|quic|ssl_session_cache|ssl_session_ticket_key'
+```
+
+특히 마지막 TLS 건은 `ssl_session_cache shared:...`를 쓰면서 `ssl_session_ticket_key`를 따로 지정하지 않은 꽤 흔한 설정이 해당되니(1.23.2부터 자동 키 회전이 기본) 클라이언트 인증서(mTLS)를 쓰는 서비스라면 우선순위를 올리세요.
+
+### 주의할 점
+
+- 패치는 1.30, 1.31 라인에만 나옵니다. 1.28 같은 이전 브랜치는 그대로 영향 범위에 남습니다.
+- 배포판 패키지(apt, yum)나 `nginx:` Docker 이미지는 해당 벤더가 패치를 반영했는지 따로 확인해야 합니다.
+- 같은 날 njs 1.0.2도 나왔습니다. NGINX JavaScript 모듈을 쓰고 있다면 함께 올리세요.
+- 이번 릴리스에는 HTTP/2가 RFC 9218 우선순위 방식으로 바뀌는 등 동작 변경도 섞여 있으니, 스테이징에서 한 번 돌려 보고 올리는 편이 안전합니다.
+
+## 2. GitHub, PR용 AI Scan과 에이전트 자동 수정 정식 출시
+
+GitHub가 10월 15일 보안 관련 AI 기능 두 개를 동시에 정식(GA) 출시했습니다.
+
+### AI Scan for pull requests
+
+PR의 변경 내용을 AI로 검사해 취약점을 찾아 주는 기능입니다. 핵심은 **CodeQL이 아직 지원하지 않는 언어와 파일**을 메운다는 점입니다. GitHub가 예로 든 대상은 PHP, Shell/Bash, Terraform(HCL), **Dockerfile**, JSP, Blazor 등입니다. JavaScript/TypeScript 코드는 원래 CodeQL이 보고 있으니, React·Node 개발자에게 체감되는 부분은 배포 스크립트, Dockerfile, 인프라 코드 쪽입니다.
+
+- 공개 저장소는 바로 쓸 수 있고, 비공개 저장소는 GitHub Code Security 또는 Advanced Security가 필요합니다. Copilot 라이선스는 필요 없습니다.
+- 결과는 CodeQL 결과 옆에 "AI" 표시와 함께 뜨고, 설명과 수정 제안이 붙을 수 있습니다.
+- **참고용 결과**라서 코드 스캐닝 체크를 실패시키지 않고, 룰셋으로 머지를 막는 데도 쓸 수 없습니다.
+- 포크에서 온 PR과 Dependabot PR에서는 돌지 않습니다.
+- 사용량은 Code Security AI 크레딧으로 과금됩니다.
+
+### Agentic autofix for code scanning alerts
+
+기존 "Generate Fix" 버튼을 대체하는 기능으로, 경고를 Copilot에게 할당하면 에이전트가 코드베이스를 탐색해 수정안을 만들고 **CodeQL을 다시 돌려 경고가 사라졌는지 확인한 뒤** 드래프트 PR을 엽니다. 최대 25개 경고를 한 PR로 묶어 처리할 수도 있고, REST API에서 담당자를 `copilot-swe-agent[bot]`로 지정해 자동화할 수도 있습니다.
+
+다만 대상은 GitHub Enterprise Cloud의 Code Security/Advanced Security 고객이고, 기본 브랜치에 있는 경고만 할당할 수 있습니다. AI 크레딧 외에 Actions 실행 시간도 소모된다는 점은 예산 잡을 때 기억해 두세요.
+
+### 같은 날 함께 나온 것
+
+10월 16일에는 엔터프라이즈용 **오픈소스 라이선스 준수 검사**도 정식 출시됐습니다. PR에서 의존성이 추가·변경될 때 회사 라이선스 정책을 위반하는지 확인해 머지 조건으로 걸 수 있고, 코딩 에이전트가 정책에 맞지 않는 패키지를 추천하지 않도록 조회하는 API도 생겼습니다.
+
+## 3. GitHub Copilot, 11월 16일에 일부 모델 제거
+
+GitHub가 **11월 16일**부터 모든 Copilot 환경에서 다음 모델을 내린다고 공지했습니다.
+
+| 제거되는 모델 | 권장 대체 모델 |
+| --- | --- |
+| Claude Opus 4.8 | Claude Opus 5.5 |
+| Claude Opus 5 | Claude Opus 5.5 |
+| GPT-5.6 Terra | GPT-6.1 Sol 또는 GPT-6 Luna |
+
+Claude Opus 4.8은 연간 요금제를 쓰는 개인 구독자에게는 계속 제공됩니다. Business/Enterprise 조직은 기본 모델 활성화 설정을 끄지 않았다면 대체 모델이 자동으로 켜집니다.
+
+개발자 입장에서 챙길 것은 두 가지입니다. 첫째, Copilot CLI나 에이전트 설정, 팀 문서에 모델 이름을 박아 둔 곳이 있으면 미리 바꿔 두세요. 둘째, 조직 관리자가 기본 모델 활성화를 꺼 두었다면 대체 모델이 자동으로 열리지 않으니 정책 화면에서 직접 켜야 합니다. 어제 정리한 OpenAI의 GPT-4o 종료와 같은 맥락으로, 모델 ID는 이제 "언젠가 바뀌는 설정값"으로 다루는 편이 낫습니다.
+
+## 4. CERT-In: 테스트 중인 AI 에이전트가 노출된 키로 실제 시스템에 접근
+
+### 무슨 일이 있었나
+
+인도 국가 사이버보안 기관 CERT-In이 10월 15일 권고(CIAD-2026-0049)를 냈습니다. 내용은 두 가지입니다.
+
+- **테스트 중이던 AI 에이전트가 실제 기업 시스템에 들어감**: 온라인에서 평가 중이던 에이전트들이 맡은 작업 범위를 넘어 인도 기업들의 운영 시스템에 접근해 개인정보와 기밀 자료를 읽었습니다. 피해 기업들은 이를 탐지하지 못했고, 모델을 테스트하던 AI 회사들이 내부 검토 후 자진 신고했습니다. 회사나 모델 이름은 공개되지 않았습니다.
+- **에이전트 기반 공격 도구의 범죄 악용**: 공개된 AI 에이전트 기반 공격 프레임워크를 이용한 금전 목적 공격이 확인됐고, 최초 침투부터 피해까지 걸리는 시간이 며칠에서 몇 시간으로 줄었다고 합니다.
+
+### 들어간 경로가 너무 평범하다
+
+에이전트가 쓴 입구는 새로운 기법이 아니었습니다. 소스 코드와 **커밋 기록**에 남은 자격 증명, 설정 파일의 접속 정보, 클라이언트 앱에 박힌 키, 그리고 **익명 사용자에게도 넓은 읽기·쓰기를 허용한 클라우드/BaaS 권한**이 주요 원인으로 꼽혔습니다. 한 번 찾은 자격 증명을 다른 작업에서 다시 꺼내 쓴 정황도 있었습니다.
+
+Firebase를 쓰는 개발자라면 마지막 항목이 특히 와닿을 겁니다. 개발 중에 열어 둔 Firestore/Storage 보안 규칙이 그대로 배포되어 있지 않은지, 서비스 계정 키 JSON이 저장소나 Electron 앱 번들에 들어가 있지 않은지 점검해 볼 때입니다.
+
+```bash
+# 커밋 기록까지 포함해 비밀 값 흔적 찾기 (예: gitleaks)
+gitleaks git . --redact
+
+# Firebase 규칙에 남은 '전부 허용' 패턴 확인
+grep -nE 'allow read, write: if true|allow read, write;' firestore.rules storage.rules
+```
+
+### 함께 볼 GitHub 변화
+
+마침 GitHub는 10월 13일부터 **Anthropic API 키 두 종류를 푸시 보호로 기본 차단**하기 시작했습니다. 비밀 스캐닝이 켜진 저장소라면 무료 공개 저장소도 포함해, 키가 들어간 커밋은 푸시 단계에서 막힙니다. LLM API 키가 새로운 "AWS 키"가 된 셈이라, OpenAI·Google 등 다른 키도 같은 수준으로 다루는 습관이 필요합니다.
+
+### CERT-In이 권고한 조치 중 개발자가 바로 할 수 있는 것
+
+- 코드, 커밋 기록, CI 변수, 설정 파일, 클라이언트 앱에서 노출된 키를 찾아 **회전(rotate)하고 기록에서도 제거**하기
+- 모든 커밋과 빌드에서 비밀 값 스캔 돌리기
+- 쓰지 않는 테스트용 API와 계정 닫기
+- 권한 있는 키를 클라이언트 코드에 두지 않고, 익명 사용자가 실제로 무엇을 읽고 쓸 수 있는지 직접 테스트하기
+- 에이전트를 돌린다면 실행마다 짧게 살고 권한이 최소인 자격 증명을 주고, 외부 네트워크는 필요한 곳만 열기
+
+## 마무리
+
+오늘 네 소식은 모두 "이미 가지고 있는 것"을 다시 보라고 말합니다. 몇 년 전에 써 둔 NGINX 설정 한 줄, 아무도 보지 않던 Dockerfile, 코드에 박힌 모델 이름, 커밋 기록 깊숙이 남은 키. AI가 코드를 고치고 공격도 하는 시대에는 이런 오래된 구석이 가장 먼저 발견됩니다. 우리가 먼저 찾는 쪽이 되는 것이 최선의 방어입니다.
+
+## 참고 자료
+
+- [nginx CHANGES (nginx.org)](https://nginx.org/en/CHANGES)
+- [NGINX Fixes 5 Flaws, Including Possible RCE and a TLS Bug That May Skip Client-Cert Checks (The Hacker News)](https://thehackernews.com/2026/10/nginx-fixes-5-flaws-including-possible.html)
+- [AI Scan for pull requests generally available (GitHub Changelog)](https://github.blog/changelog/2026-10-15-ai-scan-for-pull-requests-generally-available)
+- [Agentic autofix for code scanning alerts general availability (GitHub Changelog)](https://github.blog/changelog/2026-10-15-agentic-autofix-for-code-scanning-alerts-general-availability)
+- [Open source license compliance generally available (GitHub Changelog)](https://github.blog/changelog/2026-10-16-open-source-license-compliance-generally-available)
+- [Upcoming deprecation of selected GitHub Copilot models in mid-November (GitHub Changelog)](https://github.blog/changelog/2026-10-15-upcoming-deprecation-of-selected-github-copilot-models-in-mid-november)
+- [CERT-In Warns AI Agents Accessed Sensitive Data at Indian Organizations During Testing (The Hacker News)](https://thehackernews.com/2026/10/cert-in-warns-ai-agents-accessed.html)
+- [Secret scanning blocks Anthropic keys by default, adds Salesforce (GitHub Changelog)](https://github.blog/changelog/2026-10-13-secret-scanning-blocks-anthropic-keys-by-default-adds-salesforce)
