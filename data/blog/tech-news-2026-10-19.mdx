@@ -1,0 +1,158 @@
+---
+title: '오늘의 IT 소식: OpenCode Console 키 유출, npm 네이티브 애드온 악성 패키지, PostgreSQL 19 RC 1과 출시 연기, Chrome XSLT 제거'
+date: '2026-10-19'
+tags: ['IT-News', 'Security', 'AI-Agent', 'npm', 'Database', 'Backend']
+draft: false
+summary: 'OpenCode Console에 저장된 AI 제공사 API 키가 유출된 사고, Windows 네이티브 애드온 안에 악성 로더를 숨긴 npm 패키지 imgdecode, AI 코드 리뷰가 찾아낸 버그로 정식 출시가 11월 19일로 밀린 PostgreSQL 19, 그리고 11월 17일 Chrome 158에서 사라지는 XSLT를 정리합니다.'
+---
+
+주말 사이 소식은 "어딘가에 맡겨 둔 것"이 어떻게 문제가 되는지를 보여 줍니다. 클라우드 콘솔에 저장해 둔 API 키, 무심코 설치한 npm 패키지, 그리고 오래 기대 온 브라우저 기능까지 하나씩 살펴보겠습니다. 마지막으로 AI 리뷰가 오픈소스 데이터베이스의 출시 일정을 바꾼 사례도 함께 다룹니다.
+
+## 1. OpenCode Console, 저장된 AI 제공사 API 키 유출
+
+### 무슨 일이 있었나
+
+오픈소스 코딩 에이전트 OpenCode를 만드는 팀이 10월 17일(미국 시간), 웹 서비스인 **OpenCode Console**에 보안 사고가 있었다고 X를 통해 확인했습니다. 피해를 입은 것은 Console 사용자의 약 **1.4%**, 그중에서도 워크스페이스에 OpenAI, Anthropic, Google 같은 외부 제공사의 API 키를 연결해 둔 사용자입니다.
+
+OpenCode가 밝힌 내용은 아직 많지 않습니다.
+
+- 침입 대상은 **폐기 작업 중이던 레거시 시스템**이었습니다.
+- 회사는 이 사건을 대규모 "distillation attack"과 관련된 것으로 설명했습니다. 다른 모델을 학습시키려고 남의 키로 모델 출력을 대량으로 뽑아 가는 공격을 흔히 이렇게 부르지만, 이번 사건의 구체적인 침입 경로는 공개되지 않았습니다.
+- 영향을 받은 사용자에게는 이메일을 보냈고, 이메일을 받지 않았다면 해당하지 않는다고 안내했습니다.
+- 사용자들 사이에서는 직접 쓰지 않은 요금이 청구됐다는 제보가 나오고 있습니다. 다만 이는 개인 제보이고, OpenCode가 확인한 수치는 아닙니다.
+
+어제 글에서 OpenCode 2.0을 소개했는데, 이번 사고는 로컬 CLI가 아니라 **호스팅되는 Console 쪽 문제**라는 점을 구분해서 보면 좋겠습니다.
+
+### 지금 해야 할 일
+
+이메일을 받았다면, 혹은 Console에 제공사 키를 넣어 둔 적이 있다면 아래 순서로 정리하는 것을 권합니다.
+
+1. **각 제공사 대시보드에서 직접 키를 폐기**합니다. OpenCode에서 키를 지우는 것만으로는 이미 복사된 키를 막을 수 없습니다. 메일 속 링크보다 제공사 사이트에 직접 접속하는 편이 안전합니다.
+2. 새 키를 발급해 앱, 스크립트, CI 시크릿 등 **옛 키를 쓰던 곳을 모두 바꿉니다**.
+3. 10월 16일 이후 제공사의 **사용량과 청구 내역**에서 낯선 모델이나 이상한 시간대 호출이 없는지 확인합니다.
+4. 앞으로는 서비스마다 키를 따로 쓰고, **지출 한도와 알림**을 걸어 두세요.
+
+### 개발자에게 왜 중요한가
+
+AI 코딩 도구가 늘면서 API 키를 이 서비스 저 서비스에 붙여 넣는 일이 잦아졌습니다. 키 하나가 곧 결제 수단이기 때문에, 유출되면 바로 돈이 빠져나갑니다. 키는 사람 계정이 아니라 **서비스 계정처럼** 다뤄야 합니다. 누가 쓰는지, 어디에 저장됐는지, 언제 교체할지를 정해 두는 것이 가장 현실적인 방어입니다.
+
+## 2. npm 패키지 imgdecode: Windows 네이티브 애드온 안에 숨긴 악성 로더
+
+### 무엇이 발견됐나
+
+The Hacker News가 10월 17일, 보안 업체 SafeDep의 분석을 인용해 npm 패키지 **`imgdecode`** 를 보도했습니다. 2023년 8월부터 악성 패키지를 꾸준히 올려 온 **MALFEX** 캠페인의 새 패키지입니다. 9월 30일 1.0.0이 처음 올라왔고, 10월 11일 1.0.3까지 나왔으며 기사 작성 시점 다운로드 수는 979회였습니다.
+
+이 패키지가 기존 악성 패키지와 다른 점은 **악성 동작이 JavaScript가 아니라 컴파일된 DLL 안에 있다**는 것입니다.
+
+- 패키지의 JavaScript 파일은 아홉 줄짜리로, 64비트 Windows 네이티브 애드온을 불러오는 일만 합니다.
+- Windows에서 `require('imgdecode')`가 실행되면 DLL이 GitHub 저장소의 JPG 이미지에 숨겨 둔 암호화된 셸코드를 받아 복호화하고, 새로 띄운 `dllhost.exe` 프로세스에 주입합니다.
+- 최종적으로 실행되는 스틸러는 브라우저 정보, Discord·Telegram 데이터, 암호화폐 지갑, 그리고 `.env`, `.pem`, `.kdbx` 같은 파일을 노립니다. 원격 셸, 화면 캡처, 키보드·마우스 조작 기능도 있습니다.
+- 지속성을 위해 레지스트리 Run 키와 `MicrosoftEdgeUpdateService`라는 이름의 예약 작업을 만듭니다.
+
+같은 캠페인은 10월 초에도 `function-flag` 등 악성 패키지 여덟 개로 보도된 적이 있습니다. 이쪽은 `postinstall` 스크립트로 페이로드를 내려받는 방식이었습니다.
+
+### 개발자에게 왜 중요한가
+
+많은 팀이 "설치 스크립트만 막으면 된다"고 생각합니다. 그런데 imgdecode는 **설치할 때가 아니라 `require`하는 순간** 동작합니다. 그래서 `--ignore-scripts`로는 막을 수 없습니다. 또 JavaScript 소스만 훑어보는 리뷰나 정적 분석에도 잘 걸리지 않습니다.
+
+Windows에서 Electron이나 Node.js로 데스크톱 앱을 만든다면 네이티브 모듈이 흔하기 때문에 특히 신경 써야 합니다.
+
+- 새로 추가하는 의존성 중 `.node`, `.dll` 같은 **미리 빌드된 바이너리**가 들어 있는 패키지는 한 번 더 확인합니다.
+- 이름이 그럴듯한 이미지·유틸 패키지라도 다운로드 수, 게시자, 저장소가 정상인지 봅니다.
+- 이미 설치했다면 해당 PC를 감염된 것으로 보고 격리한 뒤, 저장된 자격 증명을 모두 교체하세요.
+
+```bash
+# 프로젝트에 미리 빌드된 네이티브 바이너리가 있는지 훑어보기
+find node_modules -name "*.node" -o -name "*.dll" | head -50
+```
+
+## 3. PostgreSQL 19 RC 1 공개, 정식 출시는 11월 19일로
+
+### 무엇이 나왔나
+
+PostgreSQL 글로벌 개발 그룹이 10월 15일 **PostgreSQL 19 RC 1**을 공개했습니다. 큰 문제가 없다면 정식 출시는 **2026년 11월 19일**입니다. 11월 12일 정기 업데이트에 수정 사항이 많이 들어가기 때문에, 이것까지 반영한 **RC 2**를 같은 날 내고 정식 출시로 넘어가는 일정입니다.
+
+RC 1에서 눈에 띄는 기능은 이렇습니다.
+
+- **`REPACK (CONCURRENTLY)`**: 읽기와 쓰기를 막지 않고 테이블을 다시 정리해 디스크 공간을 회수합니다.
+- **`pg_plan_advice`**: 쿼리 플래너의 결정을 조정할 수 있는 확장입니다.
+- **병렬 autovacuum**과 테이블 우선순위 점수제.
+- `wal_level`이 `replica`면 **재시작 없이 논리 복제**를 켤 수 있습니다. 시퀀스 값도 복제됩니다.
+- 스탠바이에서 "내가 쓴 데이터를 바로 읽기"를 보장하는 **`WAIT`** 명령.
+
+### 출시가 늦어진 이유: AI 리뷰
+
+원래 9월 말에서 10월 초를 목표로 했던 PostgreSQL 19가 늦어진 데에는 **LLM 기반 코드 리뷰**가 한몫했습니다. The Register 보도에 따르면, 핵심 커미터 Peter Eisentraut는 블로그에서 8~10개의 큰 기능이 19에서 빠져 20으로 미뤄졌다고 밝혔습니다. 대표적인 예가 그래프 쿼리 표준인 **SQL/PGQ**입니다.
+
+Eisentraut의 설명은 이렇습니다. 기능이 커밋된 뒤 AI 리뷰 도구가 좋아지면서 품질 기준이 높아졌고, 일부 기능에서는 고치기 어려운 설계상 결함이 드러났습니다. 그 밖에도 예전 같으면 출시 후 몇 년에 걸쳐 발견됐을 작은 경계 조건 버그가 한꺼번에 쏟아졌습니다. 그가 든 예시는 수정 자체는 평균 세 줄 남짓인 결함 보고 약 40건인데, 하나하나 처리하는 데 드는 부담이 남은 시간을 다 잡아먹었다고 합니다.
+
+### 업그레이드 전에 확인할 점
+
+19는 메이저 업그레이드라 `pg_upgrade`나 덤프·복원이 필요하고, 호환성이 깨지는 변경도 있습니다.
+
+- `standard_conforming_strings`가 항상 `on`입니다. 이 값을 `off`로 두고 만든 예전 덤프는 제대로 복원되지 않을 수 있습니다.
+- **JIT가 기본으로 꺼집니다.** 무거운 분석 쿼리가 많다면 직접 켜야 합니다.
+- `max_locks_per_transaction` 기본값이 64에서 128로 바뀌었습니다. 기존 설정값은 두 배로 맞춰야 할 수 있습니다.
+- 행이 없을 때 `json_array()`가 `NULL` 대신 빈 배열을 돌려줍니다. Node.js 백엔드에서 결과가 `null`인지 검사하던 코드가 있다면 확인해 보세요.
+- MD5 비밀번호 인증에 경고가 붙고, RADIUS 지원은 제거됐습니다.
+
+개발 환경에서 RC로 마이그레이션을 미리 돌려 보기 좋은 시점입니다.
+
+## 4. Chrome 158, 11월 17일부터 XSLT 지원 중단
+
+### 무엇이 바뀌나
+
+Google은 **11월 17일 출시되는 Chrome 158 안정 버전**부터 브라우저의 XSLT 지원을 끈다고 공식 문서에 밝혀 두었습니다. 이번 주 GeekNews에도 정리 글이 올라오면서 다시 화제가 됐습니다. 사라지는 것은 두 가지입니다.
+
+- JavaScript의 `XSLTProcessor` 클래스
+- XML 문서 안의 `<?xml-stylesheet type="text/xsl" ...?>` 처리 명령
+
+`type="text/css"`로 XML에 CSS를 입히는 방식은 그대로 동작합니다. Google은 오래된 C/C++ 라이브러리인 libxslt의 보안 위험에 비해 실제 사용률이 아주 낮다는 점을 제거 이유로 듭니다.
+
+### 유예 수단과 기한
+
+- **엔터프라이즈 정책 `XSLTEnabled`** (Chrome 146부터)와 **오리진 트라이얼** (Chrome 152부터)로 당분간 계속 쓸 수 있습니다.
+- 두 수단 모두 **Chrome 176이 나오는 2027년 8월 17일**에 끝납니다. 그 뒤에는 모든 사용자에게서 XSLT가 꺼집니다.
+- Edge도 Chromium을 따르지만 아직 날짜를 공개하지 않았습니다.
+
+### 개발자에게 왜 중요한가
+
+대부분의 React·Next.js 앱과는 상관이 없습니다. 하지만 아래에 해당한다면 지금 확인해 두는 것이 좋습니다.
+
+- **사이트맵이나 RSS를 브라우저에서 예쁘게 보여 주려고** XSL 스타일시트를 붙여 둔 경우. 검색 엔진 크롤러는 스타일시트를 실행하지 않기 때문에 색인에는 영향이 없고, 사람이 볼 때 원본 XML 트리로 보일 뿐입니다.
+- 관리자 화면 등에서 `XSLTProcessor`로 XML을 HTML로 바꾸는 오래된 코드가 남아 있는 경우.
+- Electron 앱. Electron은 Chromium을 따라가므로, Chromium 158 이상을 쓰는 버전부터는 같은 영향을 받을 가능성이 큽니다.
+
+대안으로는 서버에서 미리 변환한 HTML 내려주기, 데이터를 JSON으로 바꿔 클라이언트에서 렌더링하기, Google이 안내하는 WASM 기반 폴리필이나 Saxon-JS 같은 라이브러리 쓰기가 있습니다. 사용 여부는 `ReportingObserver`로 감지할 수 있습니다.
+
+```js
+// XSLT 지원 중단 경고 수집
+const observer = new ReportingObserver(
+  (reports) => {
+    for (const report of reports) {
+      if (report.body.id === 'XSLT') {
+        console.warn('XSLT 사용 감지:', report.url)
+      }
+    }
+  },
+  { types: ['deprecation'], buffered: true }
+)
+observer.observe()
+```
+
+## 마무리
+
+오늘 소식을 한 줄로 정리하면 "맡겨 둔 것은 언젠가 청구서로 돌아온다"입니다. 콘솔에 저장한 키, 검사 없이 추가한 의존성, 언젠가 사라질 브라우저 기능 모두 마찬가지입니다. 이번 주에는 내 키가 어디어디에 저장돼 있는지 목록부터 만들어 보면 어떨까요.
+
+## 참고 자료
+
+- [OpenCode Breach: What Happened and How to Rotate Exposed AI API Keys - Cyera](https://www.cyera.com/research/opencode-breach-what-happened-and-how-to-rotate-exposed-ai-api-keys)
+- [OpenCode Told 1.4% of Console Users to Revoke Their OpenAI and Anthropic Keys - DEV Community](https://dev.to/gabrielanhaia/opencode-told-14-of-console-users-to-revoke-their-openai-and-anthropic-keys-561)
+- [OpenCode 공식 공지 - X](https://x.com/opencode/status/2111519637049319818)
+- [MALFEX npm Package imgdecode Hides Shellcode Loader in Windows Native Addon - The Hacker News](https://thehackernews.com/2026/10/malfex-npm-package-imgdecode-hides.html)
+- [Eight Malicious npm Packages Downloaded 40,767 Times Deliver Overlord RAT and Stealer - The Hacker News](https://thehackernews.com/2026/10/eight-malicious-npm-packages-downloaded.html)
+- [PostgreSQL 19 RC 1 Released! - PostgreSQL](https://www.postgresql.org/about/news/postgresql-19-rc-1-released-3409/)
+- [PostgreSQL 19 Release Notes - PostgreSQL](https://www.postgresql.org/docs/19/release-19.html)
+- [Postgres 19 delayed after AI reviewers find more bugs than humans can fix - The Register](https://www.theregister.com/databases/2026/10/16/postgres-19-delayed-after-ai-reviewers-find-more-bugs-than-humans-can-fix/5303471)
+- [Removing XSLT for a more secure browser - Chrome for Developers](https://developer.chrome.com/docs/web-platform/deprecating-xslt)
+- [Chrome과 Edge의 XSLT 제거: 무엇이 깨지고 무엇은 그대로인가 - GeekNews](https://news.hada.io/topic?id=35594)
