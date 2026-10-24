@@ -1,0 +1,138 @@
+---
+title: '오늘의 IT 소식: Node2Shell 공개, TanStack AI 1.0, Ruby 정규식 엔진 패치, macOS 헤드리스 Chrome 복제본 누적'
+date: '2026-10-24'
+tags: ['IT-News', 'Security', 'Node.js', 'React', 'TypeScript', 'AI-Agent', 'GitLab', 'Backend']
+draft: false
+summary: 'Node.js Brotli 디코더 버그가 공식 빌드에서 실제 코드 실행까지 이어진다는 Node2Shell 시연이 나오면서 Express 5 서버의 업데이트가 더 급해졌습니다. 76개 패키지가 함께 안정화된 TanStack AI 1.0, GitLab 치명적 취약점의 뿌리였던 Ruby 정규식 엔진 패치, macOS에서 헤드리스 Chrome을 강제 종료할 때 쌓이는 앱 복제본 문제도 정리합니다.'
+---
+
+오늘은 이틀 전에 다룬 Node.js 보안 릴리스의 후속 소식부터 시작합니다. "가능성이 있다" 수준이던 Brotli 버그가 실제로 공격 코드까지 만들어졌기 때문입니다. 여기에 React·TypeScript로 AI 기능을 만드는 사람이라면 눈여겨볼 TanStack AI 1.0, 사용자 입력으로 정규식을 만드는 코드에 대한 경고가 된 Ruby 패치, 그리고 Mac에서 Playwright로 Chrome을 돌리는 사람이 겪을 수 있는 의외의 문제를 골랐습니다.
+
+## 1. Node2Shell: Node.js Brotli 버그, 공식 빌드에서 코드 실행까지
+
+### 무엇인가
+
+10월 21일 Node.js 보안 릴리스에 포함된 Brotli 디코더 취약점(CVE-2026-111497)에 대해, 보안 업체 Imperva가 실제 원격 코드 실행 시연을 공개하고 Node2Shell이라는 이름을 붙였습니다. 디버거나 특수 빌드 없이, 공식 Node.js 24.22.0 Linux arm64 이미지에서 조작된 Brotli 데이터만으로 공격자 코드를 실행했다고 합니다.
+
+원인은 Node.js에 내장된 Brotli 라이브러리가 스트림 중간의 말이 안 되는 블록 전환을 거부하지 않고 이상한 상태로 계속 디코딩하다가 메모리 범위 밖에 쓰는 것입니다. 수정판은 업스트림 Brotli 패치를 가져와 이런 스트림을 형식 오류로 멈추게 했습니다.
+
+### 핵심 내용
+
+- **수정 버전**: 22.23.4, 24.22.1, 26.12.1. 20.x 이하와 23·25 같은 수명 종료 라인은 수정이 나오지 않습니다.
+- **노출 경로 1, 요청 본문**: Express 5의 `express.json()`, `express.urlencoded()`, `express.text()`, `express.raw()`는 Brotli로 압축된 요청 본문을 자동으로 풉니다. Imperva는 Express 5.0.0부터 5.3.0, body-parser 2.0.0부터 2.3.0까지 확인했습니다. Semgrep은 Koa 계열 본문 파서, Fastify의 `@fastify/compress`, ultimate-express도 같은 경로가 생길 수 있다고 정리했습니다.
+- **노출 경로 2, 응답**: 내장 `fetch()`로 공격자가 통제하는 서버의 Brotli 응답을 받아 읽는 경우입니다. 사용자가 넣은 URL로 서버가 요청을 보내는 웹훅, 링크 미리보기, 크롤러가 대표적입니다.
+- **노출 경로 3, 직접 호출**: `zlib.createBrotliDecompress()` 같은 API에 외부 데이터를 넣는 코드입니다.
+- **노출되지 않는 경우**: 아무 미들웨어 없는 순수 `http` 서버는 Brotli 본문을 받기만 해서는 디코딩하지 않습니다. Express 4는 같은 기본 경로가 없다고 합니다.
+- **현황**: 공격이 매번 성공하지는 않아 여러 번 시도가 필요했고, 10월 22일 기준 실제 악용 보고는 없습니다. Vercel은 들어오는 요청에 대한 차단 규칙을 넣었지만, 다른 서버에서 받아 오는 응답까지 막지는 못합니다.
+
+### 개발자에게 왜 중요한가
+
+Express 5로 올린 API 서버라면 특별한 설정 없이 `app.use(express.json())` 한 줄만으로 공격 표면이 열립니다. 클라이언트가 `Content-Encoding: br` 헤더만 붙이면 되기 때문입니다. Firebase Functions나 Lambda처럼 런타임 버전을 플랫폼이 고르는 환경도 내 함수가 어떤 Node.js 패치 버전에서 도는지 확인해야 합니다.
+
+### 주의할 점
+
+- Node.js 안에서 쓸 수 있는 우회 설정은 없다는 것이 공식 입장입니다. 결국 업데이트가 답입니다.
+- `node` 바이너리를 품은 Docker 이미지, CI 러너, 데스크톱 앱 번들도 모두 대상입니다. 이미지 태그를 고정해 두었다면 새 패치 버전으로 바꿔 다시 빌드해야 합니다.
+- 당장 올릴 수 없다면 리버스 프록시에서 신뢰할 수 없는 경로의 Brotli 요청 본문을 거부하는 것이 임시방편이 될 수 있습니다.
+
+```bash
+# 실행 중인 버전 확인
+node -p process.version
+# 22.23.4, 24.22.1, 26.12.1 이상인지 확인 후, 이미지는 다시 빌드
+docker build --pull -t my-api .
+```
+
+## 2. TanStack AI 1.0: 76개 패키지 동시 안정화
+
+### 무엇인가
+
+TanStack Query, Router를 만든 팀의 AI SDK인 TanStack AI가 10월 23일 1.0을 냈습니다. 2025년 12월 알파, 8월 RC를 거쳐 76개 패키지가 한꺼번에 안정 버전이 됐습니다. 특정 모델 회사에 묶이지 않는 타입 안전한 AI SDK를 내세우며, Vercel AI SDK와 비슷한 자리를 노리는 도구입니다.
+
+### 핵심 내용
+
+- **지원 범위**: 모델 제공사 어댑터 23개와 OpenAI 호환 API용 어댑터, React·Vue·Solid·Svelte·Angular 등 여러 UI 프레임워크, 샌드박스 제공사 11곳을 지원합니다.
+- **RC 이후 추가 기능**: `chat()`과 `useChat`에서 쓰는 서브에이전트, SKILL.md 형식의 에이전트 스킬 로딩, 긴 대화를 줄이는 컴팩션, 모델별로 타입이 붙는 `reasoning` 옵션, 자동 프롬프트 캐싱, 재시도 옵션이 들어왔습니다.
+- **MCP**: `createMCPServer`로 내 도구를 MCP 서버로 내보내 Claude Desktop이나 Cursor에서 쓸 수 있습니다.
+- **테스트**: 네트워크와 API 키 없이 `chat()`, 도구, 미들웨어를 테스트할 수 있는 `fakeText()`가 생겼습니다.
+- **에이전트 하네스(실험적)**: 장시간 대화형 에이전트를 위한 `@tanstack/ai-harness`가 공개됐습니다. 대화마다 세션 로그를 남겨 배포나 장애로 끊긴 턴을 다른 호스트에서 이어 가고, 승인 대기 같은 상태도 재시작 후 유지합니다. 같은 정의를 터미널 CLI, HTTP, MCP 서버 등으로 실행할 수 있습니다. 다만 하네스 관련 패키지는 아직 0.x라 마이너 버전에서 바뀔 수 있습니다.
+
+### 개발자에게 왜 중요한가
+
+React로 채팅이나 생성 기능을 붙일 때 제공사를 바꿔도 코드를 크게 고치지 않게 해 주는 것이 이 SDK의 핵심입니다. 1.0이 됐다는 건 이제 API가 쉽게 바뀌지 않는다는 뜻이라, 사내 프로젝트에 도입하기 부담이 줄었습니다. 도구 호출 타입 오류를 컴파일 단계에서 잡아 주는 점은 TypeScript 사용자에게 특히 반갑습니다.
+
+### 주의할 점
+
+0.x에서 올리는 경우 깨지는 변경이 있습니다.
+
+- `body`는 `forwardedProps`로, `conversationId`는 `threadId`로 이름이 바뀌었습니다. 코드모드가 이름은 바꿔 주지만, 이제 필수가 된 `threadId` 값은 직접 넣어야 합니다.
+- `@tanstack/ai-react-ui` 같은 UI 패키지는 1.0이 나오지 않습니다. 각 프레임워크 패키지의 `createChatHook`으로 옮겨야 합니다.
+- 1.0 클라이언트는 1.0 서버가 필요하므로 모든 `@tanstack/ai*` 패키지를 한 번에 올려야 합니다.
+- 직접 만든 서버라면 스트림 끝에 `[DONE]`을 보내는 대신 `RUN_FINISHED` 이벤트로 끝내야 합니다.
+
+```bash
+pnpm add @tanstack/ai @tanstack/ai-react @tanstack/ai-openai
+```
+
+## 3. Ruby, GitLab 치명적 취약점 4건의 뿌리였던 정규식 엔진 버그 수정
+
+### 무엇인가
+
+Ruby가 10월 23일 4.0.9, 3.4.12, 3.3.13을 내고 내장 정규식 엔진 Onigmo의 버그 세 개를 고쳤습니다. 이 버그들은 9월부터 이번 주까지 공개된 GitLab 취약점 네 건(CVE-2026-89078, CVE-2026-93577, CVE-2026-97229, CVE-2026-110264)의 원인이었고, 그중 두 건은 로그인 없이 쓸 수 있는 CVSS 10.0이었습니다. 조작된 패턴을 컴파일하는 순간 메모리가 망가져 코드 실행으로 이어질 수 있는 종류입니다.
+
+### 핵심 내용
+
+- **영향받는 코드**: `Regexp.new`, `Regexp.union`, `Regexp.compile`이나 `/#{input}/` 같은 보간으로 공격자가 넣은 문자열을 정규식으로 컴파일하는 애플리케이션입니다. 개발자가 직접 쓴 정규식만 쓰는 앱은 해당되지 않습니다.
+- **방어가 안 되는 것**: `Regexp.timeout`은 이 버그를 막지 못하고, 짧은 패턴으로도 터지는 경우가 있어 길이 제한도 믿을 만한 방어가 아니라고 공식 안내에 적혀 있습니다.
+- **버전 주의**: 같은 주에 나온 4.0.8에는 마지막 수정이 빠져 있어 4.0.9가 필요합니다. 3.2 이하는 수명 종료로 수정이 없습니다.
+- **스캐너 주의**: Ruby는 아직 자체 CVE를 받지 않았습니다. CVE 번호로 찾는 보안 스캐너는 Ruby 설치본을 놓칠 수 있으니 위의 GitLab CVE 번호로 추적하라고 안내합니다.
+- **GitLab**: 셀프 호스팅 인스턴스는 19.5.1, 19.4.3, 19.3.6 등 각 라인의 패치 버전으로 올려야 합니다. GitLab.com은 이미 조치됐습니다.
+
+### 개발자에게 왜 중요한가
+
+Ruby를 쓰지 않더라도 사내 GitLab을 운영한다면 바로 해당되는 소식입니다. 그리고 "검색창에 정규식 지원" 같은 기능을 만들 때 사용자 입력을 그대로 정규식 엔진에 넣는 습관이 얼마나 위험한지 다시 보여 줍니다. JavaScript의 `new RegExp(userInput)`도 엔진 버그가 아니더라도 ReDoS 같은 문제를 부르기 쉬우니, 꼭 필요하지 않다면 입력을 이스케이프해서 리터럴 검색으로 처리하는 편이 안전합니다.
+
+## 4. macOS에서 헤드리스 Chrome을 강제 종료하면 쌓이는 앱 복제본
+
+### 무엇인가
+
+GeekNews에 소개된 한 개발자의 글이 화제가 됐습니다. Mac이 부팅 중 5%에서 최대 40분 동안 멈춰서 원인을 찾아보니, 렌더링 작업마다 헤드리스 Chrome을 띄우고 SIGKILL로 끄던 습관 때문에 약 6주 동안 Chrome 앱 복제본이 3만 7천여 개 쌓여 있었다는 내용입니다. 부팅 때 시스템이 이 파일들을 한꺼번에 지우느라 멈춘 것이었습니다.
+
+### 핵심 내용
+
+- **왜 복제하나**: Chromium 소스를 보면 macOS용 Chrome은 실행할 때 자기 앱 번들을 `/private/var/folders/` 아래 임시 영역에 copy-on-write 방식으로 복제해 둡니다. 실행 중에 업데이트가 디스크에 깔려도 코드 서명 검증이 깨지지 않게 하려는 장치입니다.
+- **언제 지우나**: 복제본은 Chrome이 정상적으로 정리될 때 별도 도우미 프로세스가 지웁니다. 이전 실행이 남긴 복제본을 찾아 지우는 코드는 아직 없고 관련 TODO만 남아 있어, 강제 종료로 남은 복제본은 재부팅 때까지 그대로 쌓입니다.
+- **끄는 방법**: 이 동작은 `MacAppCodeSignClone` 기능 플래그로 제어되며, 원글 작성자는 `--disable-features=MacAppCodeSignClone` 인자로 해결했다고 합니다. 작성자 경험으로는 헤드리스 모드에서 SIGTERM으로 바꿔도 복제본이 남았다고 합니다.
+- **누가 해당되나**: Chromium 소스상 Chrome for Testing 빌드에서는 이 복제 기능이 빠져 있습니다. 원글은 Playwright에서 `channel: 'chrome'`으로 설치된 Chrome을 쓰는 경우에도 해당된다고 적었습니다.
+
+### 개발자에게 왜 중요한가
+
+PDF 생성, 스크린샷, 크롤링, E2E 테스트를 Mac 개발 머신이나 Mac mini 서버에서 돌린다면 남의 일이 아닙니다. 특히 타임아웃이 나면 프로세스를 강제로 죽이는 코드가 흔한데, 이런 습관이 몇 주 동안 눈에 보이지 않게 쌓였다가 재부팅 때 한꺼번에 터집니다.
+
+### 주의할 점
+
+- 가능하면 자동화에는 설치된 Chrome보다 Chrome for Testing 빌드를 쓰는 편이 이 문제를 피하기 쉽습니다.
+- 설치된 Chrome을 꼭 써야 한다면 실행 인자에 플래그를 추가해 두세요.
+
+```ts
+import { chromium } from 'playwright'
+
+const browser = await chromium.launch({
+  channel: 'chrome',
+  args: ['--disable-features=MacAppCodeSignClone'],
+})
+```
+
+## 마무리
+
+오늘 소식들은 모두 "기본값이 나 대신 일을 해 주는 곳"에서 문제가 생긴다는 공통점이 있습니다. 자동으로 압축을 풀어 주는 본문 파서, 사용자 문자열을 받아 주는 정규식 생성자, 몰래 자기 복제본을 만드는 브라우저가 그렇습니다. 편한 기본값을 쓰고 있다면 그 기본값이 무엇을 하는지 한 번쯤 들여다볼 가치가 있습니다.
+
+## 참고 자료
+
+- [Researchers Demonstrate Node2Shell RCE Exploit on Node.js Build Using Crafted Brotli Data (The Hacker News)](https://thehackernews.com/2026/10/researchers-demonstrate-node2shell-rce.html)
+- [Patch Your Node and Eat Your Brotli (Semgrep)](https://semgrep.dev/blog/2026/patch-your-node-and-eat-your-brotli-or-you-wont-get-dessert/)
+- [Node.js October 2026 security releases 정리 (Konfirmity)](https://www.konfirmity.com/advisories/nodejs-october-2026-security-releases)
+- [TanStack AI 1.0: Still Your AI, Still Your Way](https://tanstack.com/blog/tanstack-ai-1-0)
+- [Regexp compilation fixes related to GitLab's CVEs (ruby-lang.org)](https://www.ruby-lang.org/en/news/2026/10/23/regexp-fixes-for-gitlab-cves/)
+- [Ruby Fixes Three Regex Engine Bugs Responsible for Four Critical GitLab RCE Flaws (The Hacker News)](https://thehackernews.com/2026/10/ruby-fixes-three-regex-engine-bugs.html)
+- [Mac 부팅이 5%에서 멈추는 문제 (GeekNews)](https://news.hada.io/topic?id=35839)
+- [code_sign_clone_manager.mm (Chromium 소스)](https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/mac/code_sign_clone_manager.mm)
