@@ -1,0 +1,121 @@
+---
+title: '오늘의 IT 소식: Node2Shell에서 HTTP2Shell로, LiteLLM 1.107.0 공급망 공격, Railway 환경 변수 유출, curl 보안 제보 공개 전환'
+date: '2026-10-26'
+tags: ['IT-News', 'Security', 'Node.js', 'Supply-Chain', 'AI-Agent', 'Python', 'Backend', 'Open-Source']
+draft: false
+summary: 'Node.js의 Brotli 취약점이 Python, Bun, Envoy, curl까지 번지며 HTTP2Shell로 불리게 된 과정을 정리합니다. 코딩 에이전트 인증 파일까지 훔치는 LiteLLM 1.107.0 악성 배포, 환경 변수가 복호화된 채 유출된 Railway 사고, 그리고 오늘부터 낮은 등급 취약점을 공개적으로 다루는 curl의 정책 변화도 함께 살펴봅니다.'
+---
+
+지난주 보안 이슈의 여진이 주말 내내 이어졌습니다. 오늘은 Node.js 하나의 문제로 보였던 Brotli 버그가 HTTP 스택 전체로 범위를 넓힌 이야기부터 시작합니다. 이어서 AI 개발 도구를 노린 두 건의 사고, 그리고 쏟아지는 취약점 제보에 대응하는 curl의 새 방식을 골랐습니다. 공통점은 공격자가 점점 개발자의 비밀 키와 AI 사용 권한을 정면으로 노린다는 점입니다.
+
+## 1. Node2Shell에서 HTTP2Shell로: Brotli 버그가 HTTP 스택 전체로
+
+### 무엇인가
+
+10월 21일 Node.js 보안 릴리스에서 고쳐진 Brotli 디코더 취약점(CVE-2026-111497, 별칭 Node2Shell)은 사실 Node.js만의 문제가 아니었습니다. 원인은 Google Brotli 라이브러리 자체이고, 1.0.3부터 1.2.0까지 모든 플랫폼이 영향을 받습니다. Aikido는 10월 23일, 이 라이브러리를 품고 있는 Python 패키지와 프록시, HTTP 클라이언트까지 영향 범위가 넓어졌다며 이를 HTTP2Shell이라고 부르기 시작했습니다. CVSS v4.0 점수는 9.2(치명적)입니다.
+
+문제의 함수는 입력이 잘못됐는지, 아니면 단지 데이터가 더 필요한지를 구분하지 못하는 값을 돌려주고, 빠른 경로에서는 그 값마저 무시합니다. 조작된 Brotli 스트림을 보내면 메모리 범위 밖에 쓰기가 일어나 프로세스가 죽거나 정보가 새고, 최악의 경우 코드 실행까지 이어질 수 있습니다. 근본 원인은 올해 초 업스트림에서 이미 고쳐졌지만, 보안 문제로 인식된 것은 이번이 처음입니다.
+
+### 핵심 내용
+
+- **수정 버전**: Brotli 원본은 1.2.1(구버전 계열은 1.0.10, 1.1.1), PyPI의 `Brotli`는 1.2.1, `brotlicffi`는 1.2.1.0입니다. Bun은 10월 22일 나온 1.4.4, Envoy는 1.40.0·1.39.3·1.38.6·1.37.8, Istio는 1.29.9·1.30.6·1.31.2에서 고쳐졌습니다. Node.js는 이미 다룬 대로 22.23.4, 24.22.1, 26.12.1입니다.
+- **간접 노출**: Python의 `urllib3`와 `requests`, `httpx`(brotli extra 포함 시), `aiohttp`, Scrapy는 Brotli 패키지가 설치돼 있으면 응답을 자동으로 풉니다. 내 코드가 Brotli를 직접 쓰지 않아도 외부 서버 응답 하나로 공격받을 수 있다는 뜻입니다.
+- **번들된 사본**: curl, Bun으로 컴파일한 단일 실행 파일, 정적 링크된 앱은 라이브러리를 안에 품고 있어서 패키지 버전 점검 도구에 잡히지 않을 수 있습니다. 앱을 다시 빌드해야 합니다.
+- **임시 방어**: 바로 올릴 수 없다면 들어오는 요청 중 `Content-Encoding`에 `br`이 있는 것을 디코딩 전에 거부하고, 나가는 요청에서는 `Accept-Encoding`에서 `br`을 빼는 동시에 `br` 응답을 거부해야 합니다. 헤더만 바꾸면 악의적인 서버가 그래도 Brotli를 보낼 수 있어 부족합니다.
+
+### 개발자에게 왜 중요한가
+
+풀스택 프로젝트는 대개 Node.js 하나로 끝나지 않습니다. 크롤러나 데이터 처리용 Python 워커, Bun으로 만든 스크립트, 앞단의 Envoy 프록시가 섞여 있다면, Node.js만 올리고 안심하기 쉽습니다. 특히 사용자가 넣은 URL을 대신 가져오는 서버, 웹훅 수신기, 외부 API를 많이 부르는 백엔드는 공격자가 응답을 통제할 수 있어 우선순위가 높습니다.
+
+Python 환경에서 무엇이 Brotli를 끌어오는지는 다음처럼 확인할 수 있습니다.
+
+```bash
+pip show Brotli brotlicffi
+pipdeptree -r -p Brotli
+```
+
+### 주의할 점
+
+- 리눅스 배포판은 버전 번호를 바꾸지 않고 수정만 백포트하기도 하므로, 버전만 보고 판단하지 말고 배포판 보안 공지를 함께 확인해야 합니다.
+- 패키지를 올린 뒤에는 이미지와 휠을 다시 빌드하고, 실제로 돌고 있는 워크로드가 새 버전을 쓰는지까지 확인해야 끝납니다.
+
+## 2. LiteLLM 1.107.0: Python을 켜기만 해도 AI 도구 인증 정보를 훔치는 악성 배포
+
+### 무엇인가
+
+여러 LLM 제공사 API를 하나로 묶어 주는 인기 Python 라이브러리 LiteLLM의 1.107.0 버전이 10월 21일 PyPI와 GHCR에 악성 코드가 든 채로 배포됐습니다. Socket 분석에 따르면 PyPI의 휠 7종 전부와 GHCR의 `v1.107.0` 이미지가 오염됐고, `latest`, `main-latest`, `main-stable` 같은 떠다니는 태그도 같은 이미지를 가리켰습니다.
+
+### 핵심 내용
+
+- **import하지 않아도 실행**: 패키지 안에 `.pth` 파일과 `sitecustomize.py`가 들어 있었습니다. 둘 다 Python 인터프리터가 시작될 때 자동으로 읽히는 파일이라, 해당 환경에서 아무 Python 스크립트만 돌려도 수집기가 실행됩니다.
+- **노린 대상**: 클라우드 자격 증명(AWS, Azure, GCP, Kubernetes 등), Git·npm·PyPI 토큰, SSH 키, `.env` 파일, 브라우저 데이터, 셸 기록에 더해 코딩 에이전트 인증 파일까지 목록에 있었습니다. Codex의 `~/.codex/auth.json`, Claude의 `~/.claude/.credentials.json`, Gemini, Cursor, Copilot, Windsurf, Zed, OpenCode 설정 등이 포함됩니다.
+- **지속성**: `sitecustomize.py`는 백그라운드에서 약 한 시간마다 외부 코드를 내려받아 서명 검증 없이 실행하는 로더를 띄웠습니다. 패키지를 지워도 이미 떠 있는 로더는 멈추지 않습니다.
+- **침투 경로**: 빌드 출처 증명(provenance)에는 원본 저장소 `BerriAI/litellm`이 아니라 하이픈이 들어간 `Berri-AI/litellm`이 소스로 기록돼 있었습니다. Andrew Nesbitt의 주간 정리에 따르면 메인테이너는 엔지니어 3명의 GitHub CLI OAuth 토큰이 도용됐다고 밝혔습니다.
+
+### 개발자에게 왜 중요한가
+
+AI 기능을 붙이는 백엔드나 사내 LLM 게이트웨이에서 LiteLLM은 흔히 쓰입니다. 그리고 이번 공격은 코딩 에이전트의 로그인 파일을 명시적으로 노렸습니다. 에이전트 인증 정보가 넘어가면 공격자는 내 계정으로 모델을 쓰고, 경우에 따라 에이전트가 접근할 수 있는 저장소와 도구까지 손에 넣을 수 있습니다. 개발 PC 자체가 고가치 목표가 됐다는 신호입니다.
+
+또 하나 눈여겨볼 점은 provenance가 있었는데도 막지 못했다는 것입니다. 증명은 "어디서 빌드됐다"고 기록할 뿐이고, 그 기록의 소스 이름이 원본과 같은지는 누군가 확인해야 의미가 있습니다.
+
+### 주의할 점
+
+- `litellm==1.107.0`이 설치된 적이 있는 환경은 감염된 것으로 보고, 깨끗한 환경에서 클라우드 키, AI 제공사 API 키, 에이전트 세션, 레지스트리 토큰, SSH 키를 모두 교체해야 합니다. 감염 의심 환경의 Python이나 pip를 먼저 실행하면 페이로드가 다시 돌 수 있습니다.
+- Upwind는 1.106.2를 안전한 버전으로 권고했습니다. 복구 기간에는 버전과 이미지 다이제스트를 고정하고, `latest` 같은 떠다니는 태그는 피하는 것이 좋습니다.
+
+## 3. Railway 보안 사고: 고객 환경 변수가 복호화된 채 유출
+
+### 무엇인가
+
+Node.js 앱 배포에 많이 쓰이는 PaaS인 Railway가 10월 21일, 고객 환경 변수를 저장하는 시스템에서 이상 활동을 발견했다고 공개했습니다. 공지에 따르면 권한 없는 제3자가 암호화된 환경 변수에 접근했을 수 있고, 그중 일부는 복호화된 내용까지 확보했습니다.
+
+### 핵심 내용
+
+- **즉각 조치**: Railway는 조사 기간 동안 모든 배포를 멈췄고, 업스트림 제공사들에 알려 키를 선제적으로 폐기하게 했습니다. 영향을 받은 고객에게는 개별 이메일로 알린다고 밝혔습니다. 초기 분석상 영향 범위는 일부 사용자로 보인다고 했지만, 어느 계정인지는 확정하지 않았습니다.
+- **배경**: Railway는 이번 활동이 AI 추론 제공사 접근 권한을 노리고 플랫폼 기업들을 연쇄적으로 공격하는 흐름의 일부로 본다고 설명했습니다. 원인 자체는 아직 공개되지 않았습니다.
+- **후속 안내**: 10월 23일 추가 글에서는 배포 중단 중에 푸시한 커밋이 배포되지 않았으니 최신 커밋을 다시 배포하고, GitHub 연동을 다시 연결하고, CLI와 CI 자격 증명을 새로 만들라고 안내했습니다.
+
+### 개발자에게 왜 중요한가
+
+환경 변수는 "코드에 비밀을 넣지 말라"는 원칙의 정답처럼 쓰여 왔지만, 결국 플랫폼 한곳에 모든 비밀이 모인다는 뜻이기도 합니다. Firebase 서비스 계정 키, DB 접속 문자열, OpenAI나 Anthropic API 키가 한 프로젝트의 환경 변수에 함께 들어 있다면, 이번 같은 사고 한 번으로 전부 넘어갑니다. 앞의 LiteLLM 사고와 마찬가지로 AI API 키가 주요 목표였다는 점도 겹칩니다.
+
+### 주의할 점
+
+- Railway를 쓴다면 저장된 환경 변수, API 키, 비공개 레지스트리 자격 증명을 모두 교체하고 해당 서비스 로그에서 이상 활동을 확인하라는 것이 Railway의 권고입니다.
+- AI 제공사 키는 프로젝트별로 나누고 사용 한도와 알림을 걸어 두면, 키가 새더라도 피해를 빨리 알아채고 줄일 수 있습니다.
+
+## 4. curl, 오늘부터 낮은 등급 취약점은 GitHub에서 공개 처리
+
+### 무엇인가
+
+curl 창시자 Daniel Stenberg가 10월 20일 블로그에서 예고한 정책이 오늘(10월 26일)부터 적용됩니다. curl 팀이 LOW나 MEDIUM 등급으로 판단한 취약점 제보는 비공개 HackerOne이 아니라 공개 GitHub 이슈에서 다루고, HIGH와 CRITICAL만 기존처럼 비공개로 처리합니다.
+
+### 핵심 내용
+
+- **바뀌는 흐름**: HackerOne으로 들어온 낮은 등급 제보는 GitHub로 옮겨 달라는 요청을 받고, HackerOne 쪽 제보는 정보성으로 닫힌 뒤 공개됩니다.
+- **이유**: 제보량이 계속 늘어 핵심 메인테이너들이 한계에 가까워졌기 때문입니다. 지난 몇 년간 들어온 제보의 90% 이상이 짧은 평가만으로 HIGH 미만으로 판단됐다고 합니다. 공개로 돌리면 외부 기여자가 영향 범위 분석, 원인 조사, 수정 검증을 함께 도울 수 있습니다.
+- **배경 숫자**: AI 도구로 curl 코드를 1년 가까이 분석해 온 Aisle 팀의 기여로 35건의 취약점이 CVE를 받았고, 최근 curl 8.23.0은 한 번에 24건을 고쳤습니다.
+
+### 개발자에게 왜 중요한가
+
+AI가 취약점 찾기를 크게 가속하면서 오픈소스 메인테이너의 부담이 폭발하고 있습니다. curl처럼 거의 모든 시스템에 깔린 프로젝트가 프로세스를 바꿨다는 것은, 다른 프로젝트들도 비슷한 선택을 할 수 있다는 신호입니다. 사용하는 쪽에서는 비공개 엠바고가 끝날 때까지 기다리는 대신, 낮은 등급 이슈는 공개 트래커에서 실시간으로 진행되는 모습을 보게 됩니다.
+
+### 주의할 점
+
+- 공개 처리는 패치 전에 취약점 내용이 먼저 알려질 수 있다는 뜻이기도 합니다. curl을 직접 링크하거나 번들한 앱을 배포한다면 curl GitHub 이슈의 보안 관련 항목을 지켜볼 가치가 있습니다.
+- 등급 판단은 curl 팀 기준입니다. 내 사용 방식에서는 MEDIUM이 더 크게 작용할 수 있으니, 이슈 내용을 내 환경에 맞춰 다시 따져 봐야 합니다.
+
+## 마무리
+
+오늘 소식들은 모두 "한곳에 모인 것"의 위험을 보여 줍니다. 수많은 런타임이 같은 Brotli 코드를, 수많은 앱이 같은 PaaS 비밀 저장소를, 수많은 개발 PC가 같은 AI 도구 인증 파일을 공유하고 있고, 공격자는 바로 그 지점을 노립니다. 이번 주를 시작하며 내 프로젝트가 기대고 있는 공통 의존성과 비밀이 어디에 모여 있는지 한 번 그려 보시기 바랍니다.
+
+## 참고 자료
+
+- [Aikido: Node2Shell Brotli vuln evolves to HTTP2Shell](https://www.aikido.dev/blog/python-packages-vulnerable-node2shell-brotli-cve-2026-111497)
+- [Bun v1.4.4 릴리스 노트](https://bun.com/blog/bun-v1.4.4)
+- [Node.js 2026년 10월 보안 릴리스](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+- [Socket: LiteLLM PyPI Package and Docker Images Compromised](https://socket.dev/blog/litellm-compromise)
+- [Andrew Nesbitt: This Week in Package Management, 24 October 2026](https://nesbitt.io/2026/10/24/this-week-in-package-management.html)
+- [Railway: Security Disclosure, Wednesday October 21st](https://blog.railway.com/p/security-disclosure-wednesday-october-21st)
+- [Daniel Stenberg: Do minor curl vulnerabilities in the open](https://daniel.haxx.se/blog/2026/10/20/do-minor-curl-vulnerabilities-in-the-open/)
+- [XenoSpectrum: curl의 낮은 등급 취약점 공개 처리 정책](https://xenospectrum.com/en/curl-public-vulnerability-reports-maintainer-workload/)
