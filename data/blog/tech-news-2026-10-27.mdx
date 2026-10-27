@@ -1,0 +1,130 @@
+---
+title: '오늘의 IT 소식: .NET Brotli 긴급 패치, TypeScript 7.1 베타, Rust로 옮긴 TypeScript tsrs, Wasmtime 샌드박스 탈출'
+date: '2026-10-27'
+tags: ['IT-News', 'Security', 'TypeScript', 'Node.js', 'Backend', 'Open-Source']
+draft: false
+summary: 'Brotli 취약점이 .NET까지 번지며 Microsoft가 일요일에 긴급 업데이트를 냈고, 이제는 HTTP가 아닌 이미지 파일 경로까지 거론됩니다. 지난주 조용히 나온 TypeScript 7.1 베타와 Cloudflare·VoidZero가 공개한 Rust 포트 tsrs로 타입 검사 속도 경쟁을 정리하고, WebAssembly 런타임 Wasmtime의 샌드박스 탈출 취약점 두 건도 살펴봅니다.'
+---
+
+월요일을 지나며 지난주 보안 이슈의 꼬리가 또 하나 길어졌습니다. 오늘은 Brotli 취약점이 .NET에 닿은 소식부터 시작합니다. 이어서 보안 이슈에 가려 놓치기 쉬웠던 TypeScript 쪽 큰 변화 두 가지, 그리고 남의 코드를 샌드박스에서 돌리는 서비스라면 꼭 봐야 할 Wasmtime 취약점을 골랐습니다.
+
+## 1. Brotli 취약점, .NET까지: Microsoft 대역 외 긴급 업데이트
+
+### 무엇인가
+
+Node.js에서 시작돼 Python, Bun, Envoy로 번졌던 Brotli 디코더 취약점(CVE-2026-111497)이 이번에는 .NET에 닿았습니다. Microsoft는 10월 25일(현지 시간) 정기 패치일을 기다리지 않고 .NET 8, 9, 10, 11 전체에 대역 외(OOB) 보안 업데이트를 냈습니다. Microsoft는 이 취약점의 악용 가능성을 높게 평가하고 있습니다.
+
+### 핵심 내용
+
+- **수정 버전**: .NET 8.0.33, 9.0.22, 10.0.14이고, 프리뷰 중인 .NET 11은 RC3에서 고쳐졌습니다. RC2를 쓰고 있다면 RC3로 올려야 합니다. .NET Framework는 영향이 없습니다.
+- **영향 조건**: ASP.NET Core의 요청 본문 압축 해제, `HttpClient`의 자동 응답 압축 해제, `System.IO.Compression`의 Brotli API를 쓰는 경우입니다. 앞의 두 기능은 기본값이 꺼져 있으므로, 직접 켠 적이 있는지 확인하면 우선순위를 가릴 수 있습니다.
+- **함께 고쳐진 것**: 리눅스 tarball의 파일 소유권 메타데이터 문제(CVE-2026-114148)가 새로 수정됐고, 10월 13일 정기 업데이트에서 완전히 고쳐지지 않았던 `SocketAsyncEventArgs` 메모리 손상과 Blazor WebAssembly 디버거 취약점이 다시 배포됐습니다.
+- **HTTP 밖으로 번지는 경로**: The Register 보도에 따르면 JFrog는 JPEG XL 이미지 안의 압축된 메타데이터를 통해 FFmpeg까지 공격이 닿는 시연을 내놓았고, Apache Arrow도 서비스 거부 영향이 있다고 밝혔습니다. 응답 헤더만 막아서는 부족한 경로가 생긴 셈입니다.
+
+### 개발자에게 왜 중요한가
+
+이 취약점의 핵심 교훈은 "런타임 하나 올리면 끝"이 아니라는 점입니다. Socket은 10월 26일 글에서 이번 사태의 어려움을 패치 자체가 아니라 사본 찾기라고 정리했습니다. 실제로 .NET도 Bun과 같은 함정이 있습니다. 런타임을 앱에 함께 묶어 배포하는 self-contained 앱은 서버의 런타임을 올려도 바뀌지 않고, 새 런타임으로 다시 빌드해 배포해야 합니다. 컨테이너도 새 베이스 이미지로 다시 빌드해야 합니다.
+
+풀스택 팀이라면 Node.js 백엔드 옆에 .NET으로 만든 사내 서비스나 업로드된 영상·이미지를 처리하는 FFmpeg 워커가 붙어 있는 경우가 많습니다. 사용자 업로드 파일을 변환하는 파이프라인은 이제 HTTP 서버와 같은 급으로 점검 목록에 올려야 합니다.
+
+```bash
+# 설치된 .NET 런타임 확인 (self-contained 앱과 컨테이너는 따로 확인)
+dotnet --list-runtimes
+```
+
+### 주의할 점
+
+- 패치 후에는 프로세스를 다시 시작해야 새 런타임이 적용됩니다.
+- FFmpeg, libjxl, Apache Arrow처럼 Brotli를 품은 라이브러리는 각 프로젝트와 배포판의 수정 공지를 따로 확인해야 합니다. 정적으로 링크된 바이너리는 패키지 점검 도구에 잡히지 않을 수 있습니다.
+
+## 2. TypeScript 7.1 베타: 더 빨라진 Go 컴파일러와 새 API
+
+### 무엇인가
+
+Go로 다시 작성된 TypeScript 7.0이 나온 지 두 달 만에, TypeScript 팀이 10월 20일 7.1 베타를 공개했습니다. 보안 소식에 묻혀 덜 주목받았지만, 7.x 계열에서 처음으로 도구 생태계를 위한 큰 변화가 들어간 버전입니다.
+
+### 핵심 내용
+
+- **더 빠른 타입 검사**: Microsoft가 다섯 개 코드베이스로 잰 결과, 타입 검사 시간이 13~47% 줄고 메모리도 크게 줄었습니다. 가장 큰 사례인 mui-docs는 약 22초에서 12초로 줄었습니다. 체커 스레드 4개, `--noEmit` 조건에서 잰 Microsoft 자체 측정입니다.
+- **새 프로그래밍 API**: 7.0에서 Go로 옮기며 비어 있던 컴파일러 API 자리를 새 API가 채우기 시작합니다. 스냅샷, 가상 파일 시스템 등을 지원하며, 편집기와 도구들이 앞으로 몇 버전에 걸쳐 이 위로 옮겨 갈 것으로 보입니다.
+- **content mapper**: Vue, Svelte, Astro, MDX, CSS Modules처럼 TypeScript가 아닌 파일 형식을 타입 검사에 끼워 넣는 플러그인 지점입니다. 외부 코드를 실행하는 기능이라 `--runExternalCode` 옵션을 줘야만 동작합니다.
+- **언어·설정**: import attributes(예: CSS 모듈 import)에 맞춰 ambient module을 선언할 수 있고, `.wasm`에 대한 source phase import를 지원하며, `es2026`이 정식 target과 lib 값이 됐습니다.
+
+```bash
+npm install -D typescript@beta
+```
+
+### 개발자에게 왜 중요한가
+
+7.0으로 넘어가면서 가장 아쉬웠던 부분이 Vue나 Svelte 같은 프레임워크 도구와 언어 서버 플러그인 생태계였습니다. 7.1은 그 공백을 메우는 첫 단계입니다. React와 TypeScript만 쓰는 프로젝트라면 속도와 메모리 개선만으로도 CI 시간과 개발 장비 부담이 줄어듭니다.
+
+### 주의할 점
+
+- 업데이트된 DOM 타입 정의 때문에 기존 코드에서 새 타입 오류가 날 수 있습니다.
+- union에 분배되는 conditional type의 동작이 엄격해져, 여러 패키지가 공유하는 타입 패키지에서 오류가 늘 수 있습니다. 브랜치를 따로 만들어 시험해 보는 것이 좋습니다.
+- 팀은 약 한 달 뒤 RC, 그 직후 정식 출시를 계획하고 있습니다.
+
+## 3. tsrs: Cloudflare와 VoidZero의 Rust판 TypeScript 컴파일러
+
+### 무엇인가
+
+같은 날 Cloudflare와 Vite 팀의 회사 VoidZero는 TypeScript 컴파일러를 Rust로 옮긴 tsrs를 공개했습니다. Owner.com의 Max Schwenk가 시작한 프로젝트를 Oxc 툴체인 안에서 함께 키우는 구조이며, TypeScript 팀과 긴밀히 협력하고 언어 설계는 계속 TypeScript 팀이 결정한다고 분명히 했습니다. 포크가 아니라 충실한 이식을 목표로 합니다.
+
+### 핵심 내용
+
+- **성능 주장**: 같은 수의 타입 검사 워커 기준으로 TypeScript 7.0보다 최대 8배 빠르고 메모리는 약 70% 적게 쓴다고 밝혔습니다. TypeScript 7.1 베타의 일부 최적화도 tsrs에서 나왔다고 합니다. 모두 개발사 측 수치입니다.
+- **WebAssembly 빌드**: `@tsrs/wasm` 패키지로 제공됩니다. Go는 가비지 컬렉터를 Wasm 결과물에 함께 넣어야 하지만 Rust는 그렇지 않아 Wasm에 더 적합하다는 것이 이유입니다. 브라우저 안에서 타입 검사를 돌리는 도구가 가능해집니다.
+- **유지 방식**: 업스트림 TypeScript 변경을 매일 검토하고 호환성 테스트를 매일 밤 돌리는 에이전트 기반 프로세스를 둡니다. Oxlint의 타입 기반 린트 규칙에도 쓰일 계획입니다.
+- **상태**: 실험 단계입니다. 진단 메시지 출력 순서 등 원본과 다른 부분이 아직 남아 있습니다.
+
+```bash
+npm install tsrs
+npx tsrs
+```
+
+### 개발자에게 왜 중요한가
+
+Owner.com 사례가 흥미롭습니다. 큰 코드베이스에서 타입 검사 비용이 동시에 돌릴 수 있는 코딩 에이전트 수를 제한했다는 것이 출발점이었습니다. 에이전트가 코드를 고칠 때마다 타입 검사를 돌리는 흐름에서는 컴파일러 속도가 곧 에이전트 처리량입니다. TypeScript 7의 Go 이식에 이어 Rust 이식까지 나오면서, 타입 검사가 "느려서 CI에서만 돌리는 것"에서 "수시로 돌리는 것"으로 바뀌고 있습니다.
+
+### 주의할 점
+
+- 실험 단계이므로 CI의 기준 타입 검사는 공식 `tsc`로 두고, tsrs는 로컬이나 에이전트 루프의 빠른 1차 확인용으로 시험해 보는 정도가 적절합니다.
+- 두 구현이 다른 결과를 내는 경우를 발견하면 tsrs 저장소에 보고하는 것이 프로젝트에도 도움이 됩니다.
+
+## 4. Wasmtime 샌드박스 탈출 취약점 두 건 (CVSS 9.9)
+
+### 무엇인가
+
+Bytecode Alliance의 WebAssembly 런타임 Wasmtime에서, 악의적인 Wasm 모듈이 샌드박스를 벗어날 수 있는 취약점 두 건이 공개됐습니다. 권고는 10월 19일 나왔고 The Hacker News가 10월 26일 정리 기사를 내면서 주목받았습니다. 둘 다 Wasm을 기계어로 바꾸는 기본 컴파일러 Cranelift의 문제입니다.
+
+### 핵심 내용
+
+- **CVE-2026-115889 (모든 아키텍처)**: Wasmtime 43 이전 Cranelift는 값 번호를 24비트 필드에 담았고, 릴리스 빌드에서는 넘쳐도 조용히 지나갔습니다. 아주 큰 함수를 만들면 잘못된 값을 참조하는 기계어가 생성될 수 있습니다. 43.0.0에서 32비트로 넓혀졌지만 당시에는 보안 수정으로 분류되지 않았습니다.
+- **CVE-2026-115893 (ARM64 전용)**: `br_table` 명령의 대상이 아주 많으면 범위를 벗어난 인덱스의 분기가 닿지 못하는 거리가 되고, 엉뚱한 주소로 점프하게 됩니다. 2020년 ARM64 지원 때부터 있던 버그입니다.
+- **수정 버전**: 36.0.19, 48.0.7, 49.0.4, 50.0.0입니다. 24.x LTS는 8월에 지원이 끝나 수정되지 않았습니다. 이전 ARM64 취약점 때 36.0.7, 42.0.2, 43.0.1로 올린 환경도 두 번째 취약점에는 여전히 노출돼 있습니다.
+
+### 개발자에게 왜 중요한가
+
+Wasm은 사용자 플러그인, 엣지 함수, AI 에이전트가 만든 코드를 안전하게 돌리는 격리 수단으로 점점 많이 쓰입니다. 남이 작성한 모듈을 받아 컴파일하는 서비스라면 이번 취약점이 정확히 그 격리를 깹니다. 특히 비용 때문에 ARM64 서버(AWS Graviton 등)로 옮긴 팀은 두 번째 취약점에 해당하는지 확인해야 합니다.
+
+### 주의할 점
+
+- Wasmtime은 보통 라이브러리로 앱에 들어가므로 CLI만 올려서는 안 되고, 이를 품은 프로그램을 다시 빌드해야 합니다. Spin은 4.2.4에서 Wasmtime 50.0.0으로 올렸습니다.
+- 기사 시점 기준으로 GitHub 권고 데이터베이스에는 첫 번째 CVE만 검토 완료돼 있어, Dependabot이 ARM64 취약점 알림을 보내지 않을 수 있습니다. Rust 프로젝트라면 `cargo audit`으로 RustSec 권고를 함께 확인하는 것이 안전합니다.
+
+## 마무리
+
+오늘 소식을 관통하는 말은 "다시 빌드하라"입니다. .NET self-contained 앱, Bun 단일 실행 파일, Wasmtime을 품은 프로그램 모두 런타임을 올리는 것만으로는 고쳐지지 않습니다. 반대로 TypeScript 쪽에서는 Go와 Rust 이식이 경쟁하면서 그 빌드 자체가 빠르게 가벼워지고 있습니다. 빌드가 싸질수록 자주 다시 빌드하는 습관도 쉬워지니, 이번 주에는 배포물마다 무엇을 품고 있는지 목록부터 만들어 보시기 바랍니다.
+
+## 참고 자료
+
+- [.NET October 2026 Out-of-Band Security Updates](https://devblogs.microsoft.com/dotnet/dotnet-october-2026-oob-security-updates/)
+- [The Register: Microsoft releases emergency .NET security fixes for Google Brotli bug](https://www.theregister.com/security/2026/10/26/microsoft-releases-emergency-net-security-fixes-for-google-brotli-bug/5305515)
+- [Socket: eMudhra, Brotli, and the Long Tail of a Security Fix](https://socket.dev/blog/emudhra-brotli-security-fix)
+- [Announcing TypeScript 7.1 Beta](https://devblogs.microsoft.com/typescript/announcing-typescript-7-1-beta/)
+- [Digital Applied: TypeScript 7.1 Beta, What to Test](https://www.digitalapplied.com/blog/typescript-7-1-beta-whats-new-what-to-test)
+- [Cloudflare: Introducing tsrs, a Port of TypeScript to Rust](https://blog.cloudflare.com/typescript-rust-port/)
+- [oxc-project/tsrs GitHub 저장소](https://github.com/oxc-project/tsrs)
+- [The Hacker News: Two Critical Wasmtime Flaws Could Let Malicious WebAssembly Modules Escape Sandboxes](https://thehackernews.com/2026/10/two-critical-wasmtime-flaws-could-let.html)
+- [Wasmtime 보안 권고 GHSA-897f-g5gm-fmxm](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-897f-g5gm-fmxm)
+- [Wasmtime 보안 권고 GHSA-mghf-wjfp-p5xm](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm)
