@@ -1,0 +1,124 @@
+---
+title: '오늘의 IT 소식: 공유 링크 하나로 ChatGPT 계정 탈취, Dependabot 도달 가능성 분석, C++ 코딩 하네스 Prospero'
+date: '2026-11-01'
+tags: ['IT-News', 'Security', 'JavaScript', 'TypeScript', 'GitHub', 'npm', 'AI-Agent', 'Open-Source']
+draft: false
+summary: 'ChatGPT 공유 링크를 여는 것만으로 계정을 넘겨줄 수 있었던 취약점의 공격 과정과, 그 원인이 된 postMessage 검증 누락을 정리합니다. 여기에 JavaScript·TypeScript 프로젝트의 Dependabot 알림을 실제 호출 여부로 분류해 주는 GitHub의 도달 가능성 분석, 메모리를 적게 쓰는 C++ 코딩 하네스 Prospero를 함께 다룹니다.'
+---
+
+11월의 첫 소식은 프런트엔드 개발자라면 꼭 읽어 볼 만한 취약점 분석으로 시작합니다. ChatGPT에서 공유 링크 하나로 다른 사람의 계정을 조작할 수 있었던 사례인데, 원인은 AI가 아니라 우리가 매일 쓰는 `postMessage`와 iframe 처리였습니다. 이어서 쏟아지는 의존성 보안 알림 중 무엇부터 고칠지 알려 주는 GitHub의 새 기능, 그리고 웹 기술 없이 만든 가벼운 코딩 에이전트 하네스를 소개합니다.
+
+## 1. 공유 링크 하나로 ChatGPT 계정 탈취: MathLive의 postMessage 검증 누락
+
+**무슨 일이 있었나요?**
+
+보안 연구 팀 Parameter가 10월 28일, ChatGPT의 공개 공유 링크를 연 사람의 로그인 세션에서 공격자 JavaScript를 실행할 수 있었던 취약점을 공개했습니다. 피해자는 링크를 여는 것 외에 아무것도 할 필요가 없었고, 공격자는 피해자의 대화 목록을 읽고 공유한 적 없는 비공개 대화 내용까지 외부로 빼낼 수 있었습니다. OpenAI는 10월 18일 제보를 받아 심각도를 P1로 올렸고, 10월 26일 두 웹 프런트엔드 모두에 수정을 마친 뒤 포상금 5,000달러를 지급했습니다. 지금은 해결된 문제입니다.
+
+**공격은 어떻게 이어졌나요?**
+
+하나하나는 평범한 기능인데, 여러 개가 맞물리면서 구멍이 생겼다는 점이 핵심입니다.
+
+1. 공격자가 대화에 대화형 그래프를 넣고 공유합니다. 이 그래프가 수식 입력 라이브러리 MathLive를 불러오는데, MathLive는 로딩되면서 chatgpt.com 메인 페이지에 가상 키보드 관련 `message` 이벤트 리스너를 등록합니다.
+2. 같은 대화 안의 HTML 미리보기는 별도 출처의 샌드박스에서 실행됩니다. 여기까지는 설계대로 안전했습니다.
+3. 그런데 샌드박스 안의 코드가 부모 창으로 메시지를 보내 MathLive의 키보드 레이아웃을 공격자 HTML로 바꾸고, 키보드를 띄우라고 지시할 수 있었습니다. MathLive 리스너가 보낸 쪽의 출처를 확인하지 않았고, 받은 HTML을 정제 없이 `innerHTML`로 넣었기 때문입니다.
+4. 주입된 HTML에는 `sandbox` 속성 없는 `srcdoc` iframe이 들어 있었습니다. 메인 페이지가 직접 만든 프레임이라 chatgpt.com 권한을 그대로 물려받았습니다.
+5. CSP가 인라인 스크립트를 막고 있었지만, 허용 목록에 있던 대형 동영상 서비스의 공개 엔드포인트가 콜백 이름을 응답에 그대로 반사해 주는 점을 이용해 우회했습니다.
+6. 결국 chatgpt.com 출처로 실행된 코드가 페이지에 있던 세션 정보로 웹 앱과 같은 백엔드 API를 호출했습니다.
+
+**개발자에게 왜 중요한가요?**
+
+React나 Electron 앱에서 iframe, 웹뷰, 결제 위젯, 임베드 에디터를 쓰고 있다면 같은 실수를 하기 쉽습니다. 특히 서드파티 라이브러리가 내부적으로 등록한 `message` 리스너는 우리 코드에 보이지 않아서 더 위험합니다. 직접 작성하는 리스너라면 최소한 다음처럼 출처와 보낸 창을 함께 확인하는 습관을 들이는 것이 좋습니다.
+
+```ts
+const TRUSTED_ORIGIN = 'https://widget.example.com'
+
+window.addEventListener('message', (event) => {
+  // 출처와 보낸 창을 모두 확인합니다
+  if (event.origin !== TRUSTED_ORIGIN) return
+  if (event.source !== widgetFrame.contentWindow) return
+
+  // HTML 문자열은 받지 않고, 정해진 형태의 데이터만 처리합니다
+  if (typeof event.data?.type !== 'string') return
+  handleWidgetMessage(event.data)
+})
+```
+
+**주의할 점**
+
+- 프레임 경계를 넘어 들어온 값은 전부 신뢰할 수 없는 입력으로 보고, HTML을 그대로 렌더링하지 않습니다.
+- 동적으로 만드는 iframe에는 기본적으로 `sandbox` 속성을 붙이고 필요한 권한만 엽니다.
+- CSP는 마지막 방어선일 뿐입니다. 허용 목록에 넣은 외부 도메인에 JSONP처럼 콜백을 반사하는 엔드포인트가 있으면 그대로 우회 경로가 됩니다.
+- 사용 중인 라이브러리 중 `message` 이벤트를 듣는 것이 있는지 한 번쯤 검색해 보시길 권합니다. 연구 팀도 기능을 따로따로 볼 때는 문제가 없었고, 조합했을 때만 드러났다고 강조합니다.
+
+## 2. Dependabot 알림, 이제 실제로 호출하는지 알려 줍니다
+
+**무엇이 나왔나요?**
+
+GitHub가 10월 28일 Dependabot 알림에 도달 가능성(reachability) 분석을 공개 프리뷰로 추가했습니다. 취약점이 있는 패키지를 설치했다는 사실만이 아니라, 내 코드가 그 패키지의 취약한 함수까지 실제로 호출하는지를 따져 알림마다 판정을 붙여 줍니다. 지금은 JavaScript와 TypeScript, 그리고 npm·Yarn·pnpm 락파일이 있는 리포지토리만 대상입니다.
+
+**어떻게 동작하나요?**
+
+- 권고(advisory)마다 어떤 함수가 취약한지 GitHub가 정리한 데이터를 씁니다.
+- CodeQL이 리포지토리와 의존성 전체의 호출 그래프를 만들고, 내 코드에서 그 함수까지 가는 경로를 찾습니다.
+- 분석은 GitHub가 관리하는 Actions 워크플로로 돌아가서 따로 설치할 것이 없습니다. 처음 켜면 한 번 스캔하고, 이후에는 열린 알림이 있는 동안 24시간마다 다시 돌립니다.
+
+판정은 네 가지입니다.
+
+| 판정 | 의미 | 대응 |
+| --- | --- | --- |
+| Reachable | 취약 함수까지 가는 호출 경로를 찾음 | 먼저 고칩니다 |
+| Potentially reachable | 호출 여부를 확정하지 못함 | Reachable처럼 다룹니다 |
+| Unreachable | 호출 경로를 찾지 못함 | 우선순위를 낮추되 닫지는 않습니다 |
+| Reachability unavailable | 분석 실패 또는 미지원 | 기존 방식대로 판단합니다 |
+
+Reachable 알림에는 내 파일에서 패키지를 거쳐 취약 함수에 이르는 예시 경로가 최대 다섯 개까지 표시되고, 알림 목록에서 판정별로 걸러 보거나 REST API로 가져올 수도 있습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Node.js 프로젝트는 간접 의존성이 수백 개라, 지난주 minimatch 같은 취약점이 나오면 알림이 한꺼번에 쌓입니다. 그중 실제로 내 코드가 닿는 것만 골라 낼 수 있으면 대응 순서를 정하기가 훨씬 쉬워집니다. 판정은 알림을 자동으로 닫거나 무시하지 않고 정보만 덧붙이므로, 켜 두는 부담도 적습니다.
+
+**주의할 점**
+
+- 현재는 GitHub Enterprise Cloud(데이터 레지던시 포함)에서만 쓸 수 있습니다. 별도의 Code Security 라이선스는 필요 없고, 프리뷰 동안 분석에 드는 Actions 사용 시간도 청구되지 않습니다.
+- 기본값은 꺼져 있어서 리포지토리 설정의 Advanced Security 메뉴나 조직의 보안 구성에서 직접 켜야 합니다.
+- GitHub 호스팅 러너에서만 돌고, 스캔 한 번에 3시간 제한이 있습니다. 큰 모노레포나 매니페스트가 여러 디렉터리에 흩어진 프로젝트는 결과가 안 나올 수 있습니다.
+- 공식 문서도 강조하듯 Reachable이 곧 공격 가능하다는 뜻은 아니고, Unreachable이 안전하다는 보증도 아닙니다. 정적 분석이라 동적 `require`나 문자열로 고른 함수 호출은 놓칠 수 있습니다.
+
+## 3. Prospero: 웹 기술 없이 C++로 만든 가벼운 코딩 하네스
+
+**무엇인가요?**
+
+C 프로그래밍 블로그 nullprogram으로 알려진 Chris Wellons가 10월 31일 코딩 하네스 Prospero를 공개했습니다. 코딩 하네스는 모델이 파일 읽기·수정, 셸 명령 실행 같은 도구를 쓰도록 이어 주는 프로그램으로, Claude Code나 Codex CLI 같은 도구의 바깥 껍데기에 해당합니다. 작성자는 대부분의 하네스가 웹 기술 위에 만들어져 메모리를 지나치게 많이 쓴다는 점에 불만을 느껴, C++와 Dear ImGui로 Windows·macOS·Linux용 네이티브 GUI 앱을 직접 만들었습니다. 다른 하네스보다 자원을 두 자릿수 배가량 적게 쓴다고 주장하지만, 구체적인 측정값은 글에 없습니다.
+
+**눈에 띄는 설계**
+
+- **모든 작업에 제한 시간**: 답이 없는 권한 요청은 거절로 처리되고, 시간을 넘긴 셸 명령은 백그라운드 작업으로 바뀌어 에이전트가 나중에 결과를 확인합니다. 에이전트가 하염없이 멈춰 있는 상황을 막으려는 설계입니다.
+- **고아 프로세스 없음**: 명령을 중단하면 그 명령이 띄운 하위 프로세스까지 함께 정리합니다. 개발 서버나 테스트 러너가 남아 포트를 붙잡는 일을 줄여 줍니다.
+- **필요할 때만 화면 갱신**: 대기 중에는 다시 그리지 않아 GPU를 쓰지 않습니다.
+- **헤드리스 엔진**: GUI를 닫아도 작업을 이어 가고 나중에 다시 붙을 수 있습니다. SSH나 WSL로 다른 머신에 자신을 배포해 원격에서 작업하게 할 수도 있는데, 이 기능은 유료 Professional Edition에서 온전히 제공됩니다.
+- 서브에이전트와 에이전트 간 메시지, 서브에이전트별 git worktree, MCP, 세션 분기 등 요즘 하네스에 기대하는 기능은 대부분 갖췄습니다.
+
+모델 제공자는 기본으로 들어 있지 않고, llama.cpp 같은 로컬 서버나 OpenRouter, Anthropic·OpenAI API 엔드포인트를 설정 파일로 연결합니다. Claude 구독 계정으로는 쓸 수 없습니다.
+
+**개발자에게 왜 중요한가요?**
+
+여러 에이전트를 동시에 띄우다 보면 하네스 자체가 노트북 메모리를 꽤 차지합니다. 로컬 모델을 돌리는 분이라면 그 메모리를 모델에 돌려줄 수 있다는 점이 특히 반갑습니다. 꼭 Prospero를 쓰지 않더라도, 제한 시간과 프로세스 트리 정리 같은 설계는 Electron이나 Node.js로 에이전트 도구를 직접 만들 때 참고할 만합니다.
+
+**주의할 점**
+
+- 코드는 Unlicense(퍼블릭 도메인)로 공개된 Community Edition이 무료이고, 헤드리스 엔진 전체가 포함된 Professional Edition은 itch.io에서 판매합니다.
+- 작성자 스스로 권한 시스템은 실수를 막는 안전장치일 뿐 보안 경계가 아니라고 밝힙니다. 에이전트를 제한하려면 하네스 전체를 컨테이너나 VM 안에 넣어야 합니다.
+- 갓 공개된 프로젝트라 GitHub 릴리스 페이지가 아직 비어 있습니다. 빌드 방법은 저장소의 문서를 확인해야 합니다.
+
+## 마무리
+
+오늘 소식은 모두 "보이지 않는 곳을 보이게 하기"로 묶을 수 있습니다. ChatGPT 사례는 라이브러리가 몰래 열어 둔 메시지 통로가 계정 전체를 위협할 수 있음을, Dependabot 도달 가능성 분석은 의존성 트리 깊숙한 곳의 취약점이 내 코드와 실제로 이어져 있는지를, Prospero는 에이전트 도구가 남기는 프로세스와 메모리 비용을 각각 드러냅니다. 내 코드가 직접 쓰지 않은 부분까지 한 번 더 들여다보는 한 주가 되길 바랍니다.
+
+## 참고 자료
+
+- [Do the Math: How We Took Over ChatGPT Accounts (Parameter)](https://www.parameter.ai/labs/we-found-a-gap-at-openai)
+- [Prioritize Dependabot alerts with reachability analysis (GitHub Changelog)](https://github.blog/changelog/2026-10-28-prioritize-dependabot-alerts-with-reachability-analysis/)
+- [About reachability analysis for Dependabot alerts (GitHub Docs)](https://docs.github.com/en/code-security/concepts/supply-chain-security/about-reachability-analysis-for-dependabot-alerts)
+- [도달 가능성 분석 피드백 토론 (GitHub Community)](https://github.com/orgs/community/discussions/210999)
+- [Prospero: a new coding harness for a more civilized age (nullprogram)](https://nullprogram.com/blog/2026/10/31/)
+- [Prospero GitHub 저장소](https://github.com/skeeto/prospero)
