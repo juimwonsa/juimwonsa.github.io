@@ -1,0 +1,121 @@
+---
+title: '오늘의 IT 소식: Cursor 마켓플레이스의 가짜 Claude Code 확장, DebugBear 스크립트로 털린 Polymarket, Northflank 환경 변수 유출'
+date: '2026-11-02'
+tags: ['IT-News', 'Security', 'Supply-Chain', 'AI-Agent', 'JavaScript', 'Backend', 'Tools']
+draft: false
+summary: 'Cursor 확장 마켓플레이스에 올라온 변조된 Claude Code 확장이 SSH 백도어를 심으려 한 사건, 성능 측정 업체의 DNS가 탈취되면서 Polymarket 프런트엔드에 지갑을 비우는 코드가 들어간 사건, 그리고 모든 환경 변수가 복호화됐다고 가정하라고 안내한 배포 플랫폼 Northflank의 침해 사고를 정리합니다.'
+---
+
+새로운 한 주는 공급망 보안 이야기로 시작합니다. 이번에는 세 사건 모두 우리 코드가 아니라 우리가 믿고 쓰는 곳에서 문제가 생겼습니다. 에디터의 확장 마켓플레이스, 웹 페이지에 붙여 둔 외부 측정 스크립트, 그리고 비밀 값을 맡겨 둔 배포 플랫폼입니다. 하나씩 무슨 일이 있었고 지금 무엇을 확인하면 되는지 정리합니다.
+
+## 1. Cursor 마켓플레이스에 올라온 변조된 Claude Code 확장
+
+**무슨 일이 있었나요?**
+
+Cursor가 자체 운영하는 VS Code 확장 마켓플레이스에 Anthropic이 만들지 않은 `Anthropic.claude-code` 2.1.312와 2.1.313 버전이 올라와 있었습니다. 노출 시간은 10월 29일 09:27부터 20:35(UTC)까지, 한국 시간으로는 29일 저녁 6시 반 무렵부터 다음 날 새벽 5시 반 무렵까지 약 11시간입니다. 보안 업체 Phorion이 처음 발견했고, Cursor는 영향을 받은 사용자가 최대 5,000명 정도일 것으로 추정합니다. 자동 업데이트를 켜 둔 Cursor 사용자라면 아무것도 하지 않아도 설치됐을 수 있습니다.
+
+**변조된 확장은 무엇을 했나요?**
+
+Cursor 보안 공지에 따르면 다음과 같습니다.
+
+- 호스트 이름, 사용자 이름, OS, 홈 디렉터리, 환경 변수 이름 목록, 작업 디렉터리, Git 이메일, 공인 IP를 공격자 서버로 보냈습니다.
+- `authorized_keys`에 공격자의 SSH 키(주석 `svc-telemetry`)를 추가하고, 로컬 SSH 서비스를 켠 뒤 공격자 서버로 역방향 SSH 터널을 열려고 했습니다.
+- macOS에서는 LaunchAgent, Windows에서는 SYSTEM 권한 예약 작업과 시작 프로그램 스크립트로 재부팅 후에도 터널을 다시 열도록 했고, 약 60초마다 재시도했습니다.
+
+SSH 서비스를 켜는 단계는 관리자 권한이 필요해서 대부분의 PC에서는 실패했을 것이라고 합니다. 하지만 정보 전송, 키 추가, 지속성 설치는 그와 별개로 이뤄졌기 때문에 Cursor는 권한과 상관없이 점검하라고 안내합니다.
+
+**누구 책임인가요?**
+
+아직 공격자가 어떻게 Cursor 마켓플레이스에 이 버전을 올렸는지는 공개되지 않았습니다. Anthropic의 Felix Rieseberg는 Anthropic 시스템이나 직원 노트북이 뚫린 것이 아니며, 공식 배포 채널은 영향을 받지 않았다고 밝혔습니다. Anthropic 측은 공식 VS Code Marketplace와 Open VSX도 영향이 없었다고 설명했습니다. 즉 VS Code 사용자는 해당되지 않고, Cursor에서 이 확장을 쓴 경우만 문제입니다. Cursor는 해당 버전을 내리고 마켓플레이스 전체를 잠시 내렸다가, 다른 확장의 변조 여부를 점검하고 키를 교체한 뒤 다시 열었습니다.
+
+**지금 확인할 것**
+
+확장을 최신 버전으로 올리거나 지우는 것만으로는 백도어가 사라지지 않습니다. macOS나 Linux라면 먼저 다음 정도를 확인해 볼 수 있습니다.
+
+```bash
+# 공격자 키가 추가됐는지
+grep -n "svc-telemetry" ~/.ssh/authorized_keys
+
+# 지속성 파일이 남아 있는지
+ls -la ~/.config/.smt ~/.config/.smtk 2>/dev/null
+ls -la ~/Library/LaunchAgents/com.apple.sysmond.plist 2>/dev/null   # macOS
+crontab -l | grep ".config/.smt"                                    # Linux
+```
+
+Windows라면 `%USERPROFILE%\.ssh\authorized_keys`와 `C:\ProgramData\ssh\administrators_authorized_keys`에서 같은 문자열을 찾고, `schtasks /query /tn SysMon`으로 예약 작업이 있는지 봅니다. 흔적이 나오면 Cursor 공지의 정리 스크립트를 돌리고, 그 PC에서 접근할 수 있던 Git 토큰, 클라우드 자격 증명, API 키를 다른 깨끗한 기기에서 교체하는 것이 좋습니다. Cursor는 아예 재설치를 고려하라고까지 권합니다.
+
+**개발자에게 왜 중요한가요?**
+
+코딩 에이전트 확장은 원래 셸 명령과 파일 쓰기 권한을 갖도록 설계됐기 때문에, 변조되면 그대로 개발 PC 전체의 열쇠가 됩니다. 확장 이름과 게시자가 같아도 어느 마켓플레이스에서 받았는지에 따라 내용물이 다를 수 있다는 점도 이번에 분명해졌습니다. 회사 PC라면 에디터 확장의 자동 업데이트 정책과 허용 목록을 한 번 점검해 볼 시점입니다.
+
+## 2. 성능 측정 스크립트 하나로 털린 Polymarket
+
+**무슨 일이 있었나요?**
+
+10월 29일, 예측 시장 Polymarket 웹사이트에 로그인해 있던 일부 사용자의 자금과 포지션이 공격자 지갑으로 빠져나갔습니다. 원인은 Polymarket이 페이지 속도 측정(RUM)용으로 불러오던 DebugBear 스크립트였습니다. DebugBear는 도메인 등록 대행사를 통해 자사 DNS 레코드가 탈취됐다고 밝혔고, 공격자는 DebugBear 주소로 다른 서버를 응답하게 만든 뒤 Polymarket용 스크립트 파일을 악성 코드로 바꿔치기했습니다. DebugBear는 자사 시스템 침입 흔적은 아직 없다고 합니다.
+
+Polymarket은 영향을 받은 726개 지갑에 약 270만 달러를 돌려주고 있으며, 거래 중단 중 손해를 본 사용자까지 합쳐 총 약 390만 달러를 보상한다고 밝혔습니다.
+
+**악성 코드는 어떻게 움직였나요?**
+
+Hudson Rock의 분석에 따르면 이 코드는 비밀번호나 개인 키를 빼내지 않았습니다. 대신 이미 로그인된 페이지 안에서 주문 컴포넌트와 서명 모듈을 찾아, 사용자의 서명기에 자기 요청을 서명하게 하고 Polymarket의 릴레이어로 넘겼습니다. 지갑 로그인 계정은 포지션을 공격자에게 바로 옮겼고, 이메일 로그인 계정은 포지션을 점점 나쁜 가격에 팔아 그 대금을 빼냈습니다. 첫 입금부터 마지막 입금까지 한 시간이 채 걸리지 않았습니다.
+
+**개발자에게 왜 중요한가요?**
+
+이 사건은 웹 3 서비스만의 문제가 아닙니다. 분석, 에러 추적, A/B 테스트, 채팅 위젯처럼 외부에서 불러오는 스크립트는 우리 페이지의 출처 권한을 그대로 갖고 실행됩니다. 로그인 세션이나 결제 화면에 붙어 있다면 그 페이지에서 사용자가 할 수 있는 모든 일을 대신할 수 있습니다. CSP로 도메인을 허용해 두는 것은 출처를 확인할 뿐, 그 도메인이 보내 주는 파일 내용까지 보증하지 않는다는 점이 이번에 그대로 드러났습니다.
+
+**적용해 볼 수 있는 방어책**
+
+- **민감한 페이지에서 외부 스크립트를 빼기**: 결제, 서명, 계정 설정 화면에는 측정 도구가 꼭 필요하지 않은 경우가 많습니다. Polymarket도 외부 스크립트를 더 엄격한 CSP, 버전 고정, 샌드박스와 함께 다시 넣겠다고 밝혔습니다.
+- **SRI로 파일 내용 고정하기**: 내용이 바뀌지 않는 버전 고정 파일이라면 해시를 붙여 브라우저가 변조된 파일을 거부하게 할 수 있습니다.
+
+```html
+<script
+  src="https://cdn.example.com/rum/v1.4.2/rum.js"
+  integrity="sha384-여기에-파일의-해시"
+  crossorigin="anonymous"
+></script>
+```
+
+- **SRI를 쓸 수 없다면 직접 호스팅하기**: 업체가 같은 주소의 파일을 수시로 갱신하는 방식이면 해시가 계속 바뀌어 SRI를 붙이기 어렵습니다. 이럴 때는 특정 버전을 받아 우리 도메인에서 서빙하고, 업데이트는 코드 리뷰를 거쳐 반영하는 편이 안전합니다.
+- **격리하기**: 꼭 필요한 위젯은 `sandbox` 속성을 붙인 iframe이나 별도 서브도메인으로 옮겨, 세션 토큰과 서명 모듈에 닿지 못하게 합니다.
+
+## 3. Northflank 침해: 모든 환경 변수가 복호화됐다고 가정하라
+
+**무슨 일이 있었나요?**
+
+컨테이너 배포 플랫폼 Northflank가 10월 30일 보안 사고를 공지했습니다. 보안 업체 Wiz의 경보를 받은 뒤 네트워크 정책 패치를 연달아 적용했고, 같은 날 오후 상태 페이지에 "모든 환경 변수가 복호화됐다고 가정하라"는 안내를 올렸습니다. 이후 여러 사용자가 Northflank에 저장해 둔 AI API 키가 무단으로 쓰였다고 보고했습니다. Northflank는 아직 근본 원인과 공격 경로를 공개하지 않았고, 영향을 받은 고객이나 리전 목록도 내놓지 않았습니다. 11월 1일 오전까지도 네트워킹, 빌드, 서비스 등 여러 구성 요소가 장애 상태로 표시돼 있었습니다.
+
+지난주 Railway 사고에 이어 또 한 번 PaaS에 맡긴 비밀 값이 통째로 노출된 사례입니다. Wiz는 10월 한 달 동안 사고가 공개된 AI 개발 플랫폼이 Northflank를 포함해 아홉 곳이라고 집계했지만, 이들을 잇는 공통 취약점은 찾지 못했다고 합니다.
+
+**Northflank의 안내**
+
+- 워크로드, 시크릿 그룹, 전역 시크릿에 들어 있는 모든 비밀 값을 교체합니다.
+- 공개 접근이 켜진 애드온(데이터베이스 등)은 공개 접근을 끕니다. Postgres, MongoDB, MySQL, Redis, MinIO, RabbitMQ 애드온은 차례로 자격 증명 교체 기능이 열렸습니다.
+- 감사 로그가 무료 사용자까지 모두에게 열렸으니, 내가 하지 않은 변경이 있는지 확인합니다.
+- AI 제공자 등 외부 서비스에서 이상 사용이 보이면 Northflank와 해당 제공자에게 함께 알립니다.
+
+**개발자에게 왜 중요한가요?**
+
+Firebase 서비스 계정 키, OpenAI·Anthropic API 키, 데이터베이스 비밀번호를 배포 플랫폼의 환경 변수에 넣어 두는 것은 아주 흔한 방식입니다. 플랫폼이 뚫리면 우리 코드에 아무 문제가 없어도 그 값들이 한꺼번에 나갑니다. 특히 AI API 키는 곧바로 돈이 되기 때문에 탈취 직후 남용되는 경우가 많습니다. 이 기회에 다음을 점검해 볼 만합니다.
+
+- AI 제공자 콘솔에 **사용 한도와 알림**을 설정해 두었는지
+- 키를 서비스별로 나눠, 하나가 새도 교체 범위가 작은지
+- 교체 절차를 문서로 남겨 두어 사고가 났을 때 몇 분 안에 끝낼 수 있는지
+- 가능하다면 오래 사는 키 대신 OIDC 기반 단기 자격 증명이나 별도 시크릿 매니저를 쓸 수 있는지
+
+## 마무리
+
+세 사건 모두 "신뢰는 상속된다"는 사실을 보여 줍니다. 마켓플레이스를 믿으면 그 안의 확장을, 측정 업체를 믿으면 그 업체의 DNS를, 배포 플랫폼을 믿으면 그 플랫폼의 내부망까지 믿게 됩니다. 오늘은 내가 무엇을 믿고 있는지 목록을 한 번 적어 보는 것부터 시작해 보시길 권합니다.
+
+## 참고 자료
+
+- [Security notice: malicious version of Anthropic.claude-code (Cursor)](https://cursor.com/blog/claude-code-extension-security-notice)
+- [Malicious Claude Code extension distributed through Cursor marketplace (Sophos)](https://www.sophos.com/en-us/blog/malicious-claude-code-extension-distributed-through-cursor-marketplace)
+- [Backdoor in Claude Code for VS Code extension on the Cursor Marketplace (Hacker News 토론)](https://news.ycombinator.com/item?id=50300683)
+- [Trojanized Claude Code extension coverage (The Register)](https://www.theregister.com/a/5306682)
+- [Hackers Steal About $2.7 Million From Polymarket Traders via Hijacked DebugBear Script (The Hacker News)](https://thehackernews.com/2026/11/hackers-steal-about-27-million-from.html)
+- [Polymarket client-side supply chain attack (cside)](https://cside.com/es/blog/polymarket-client-side-supply-chain-attack)
+- [Northflank security breach leads to abuse of customers' AI API keys (BleepingComputer)](https://www.bleepingcomputer.com/news/security/northflank-security-breach-leads-to-abuse-of-customers-ai-api-keys/)
+- [Northflank Security Incident (October 30, 2026) 정리 (Qovery)](https://www.qovery.com/blog/northflank-security-incident-secrets-own-cloud)
+- [this week in security, November 1 2026 edition](https://this.weekinsecurity.com/this-week-in-security-november-1-2026-edition/)
