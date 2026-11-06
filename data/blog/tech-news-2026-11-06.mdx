@@ -1,0 +1,123 @@
+---
+title: '오늘의 IT 소식: Node.js 11월 11일 보안 릴리스 예고, OpenAI가 찾은 Linux 커널 루트 탈취 948건, Meta의 Conductor 인수, Anthropic FlashProve'
+date: '2026-11-06'
+tags: ['IT-News', 'Node.js', 'Electron', 'Security', 'Linux', 'AI-Agent', 'AI', 'Open-Source']
+draft: false
+summary: '다음 주 수요일로 잡힌 Node.js 22·24·26 보안 릴리스, AI 파이프라인으로 Linux 커널 권한 상승 취약점 948건을 익스플로잇까지 만든 OpenAI의 보고서, 클라우드 서비스를 이달 20일에 닫는 Conductor의 Meta 합류, 그리고 어떤 모델이 답했는지 암호학적으로 증명하는 Anthropic의 오픈소스 프로토타입을 정리합니다.'
+---
+
+오늘은 패치 일정, 대규모로 발견되는 취약점, 그리고 AI 도구를 둘러싼 신뢰 문제를 다룹니다. Node.js나 Electron 앱을 운영하고 있다면 첫 번째 소식으로 다음 주 일정을 먼저 잡아 두세요. Conductor로 코딩 에이전트를 돌리고 있다면 세 번째 소식의 마감일이 코앞입니다.
+
+## 1. Node.js, 11월 11일에 22·24·26 세 라인 모두 HIGH 등급 보안 패치
+
+**무엇이 예고됐나요?**
+
+Node.js 프로젝트가 11월 3일 보안 릴리스 사전 공지를 올렸습니다. 미국 시간으로 **11월 11일(수) 또는 그 직후**에 새 버전이 나옵니다.
+
+- 대상은 현재 지원 중인 **26.x, 24.x, 22.x** 세 라인 전부입니다.
+- 세 라인 모두 가장 높은 등급이 **HIGH**인 취약점이 포함됩니다.
+- 취약점 개수, CVE 번호, 내용은 아직 공개하지 않았습니다. 릴리스 당일에 함께 공개됩니다.
+- 지원이 끝난 버전(EOL)은 보안 릴리스가 있을 때마다 영향을 받는 것으로 간주하라고 다시 한번 못 박았습니다.
+
+10월 21일 정기 보안 릴리스에 이어 3주 만의 패치입니다.
+
+**어떻게 준비하나요?**
+
+내용이 공개되기 전이라 지금 할 수 있는 일은 업그레이드할 자리를 미리 비워 두는 것입니다.
+
+```bash
+# 서비스와 CI에서 실제로 쓰는 버전 확인
+node -v
+
+# Docker 이미지가 어떤 태그에 묶여 있는지 확인
+grep -rn "FROM node" --include=Dockerfile* .
+
+# 20.x 이하라면 이번 패치를 받을 수 없으니 22.x 이상 이전 계획부터
+```
+
+- 한국 시간으로는 11월 12일 새벽에서 오전 사이에 릴리스가 나올 가능성이 높습니다. 12일 오전에 배포 창을 잡아 두면 좋습니다.
+- `node:22-alpine`처럼 메이저 태그를 쓰는 이미지는 다시 빌드하면 새 버전을 받지만, `22.21.0`처럼 고정한 태그는 직접 올려야 합니다.
+- **Electron 앱**은 내장 Node.js가 Electron 릴리스를 통해서만 바뀝니다. 지난 10월에도 Electron 쪽 반영까지 시간이 걸렸으니, 이번에도 Electron 릴리스 노트를 따로 지켜봐야 합니다.
+
+**개발자에게 왜 중요한가요?**
+
+HIGH 등급이 세 라인 모두에 걸려 있다는 것은 런타임 코어나 공통 의존성 쪽 문제일 가능성이 있다는 뜻입니다. 다만 내용은 아직 모르니 추측으로 우회책을 세우기보다 업그레이드 절차를 점검해 두는 것이 현실적입니다.
+
+## 2. OpenAI, AI 파이프라인으로 Linux 커널 루트 탈취 경로 948건을 익스플로잇까지
+
+**무엇을 했나요?**
+
+OpenAI가 11월 4일 "A thousand fewer paths to root"라는 보고서를 냈습니다. 취약점을 찾고, 실제로 동작하는 익스플로잇을 만들어 영향을 검증하고, 패치 후보까지 만드는 자율 AI 파이프라인을 10월 한 달 동안 Linux 커널에 돌린 결과입니다. CSO Online 보도 기준 핵심 수치는 다음과 같습니다.
+
+- 서로 다른 **로컬 권한 상승(LPE) 취약점 948건**을 익스플로잇으로 만들었습니다.
+- 전체 API 비용은 약 121만 달러로, 익스플로잇 한 건당 약 1,279달러입니다.
+- 6월에 시작한 Patch the Planet 이니셔티브의 후속 작업이며, 그때 결과는 LPE 익스플로잇 24건이었습니다.
+- 샘플 166건을 분석해 보니 에이전트가 새로운 Linux 익스플로잇 기법을 최소 10가지 썼다고 합니다.
+- 캠페인 당시 기준으로 업스트림에 패치된 것은 61건, 스테이징 패치가 있는 것은 43건, 공개 논의 중인 것은 299건입니다. 948건 전체의 처리 현황은 공개되지 않았습니다.
+
+익스플로잇과 근본 원인 분석, 패치 후보는 사람이 검토한 뒤 메인테이너에게 보낸다고 합니다. 초기 실험에서는 성공했다는 익스플로잇 200건 중 20건이 지정된 버그가 아니라 다른 제로데이로 루트를 얻은 사례도 있어서 검증 단계를 추가했다고 밝혔습니다.
+
+**개발자에게 왜 중요한가요?**
+
+LPE는 이미 서버에서 코드를 실행할 수 있는 사람이 루트로 올라가는 경로입니다. 웹 서비스 한 곳이 뚫려도 컨테이너 안에서 끝나느냐, 호스트까지 넘어가느냐가 여기서 갈립니다. 특히 남의 코드를 돌리는 환경이 위험합니다.
+
+- **CI 러너**: 외부 PR이나 서드파티 액션이 실행되는 셀프 호스티드 러너
+- **멀티 테넌트 호스트와 컨테이너 플랫폼**: 커널을 여러 고객이나 서비스가 공유하는 곳
+- **AI 에이전트 샌드박스**: 에이전트가 만든 코드를 실행하는 컨테이너
+
+보도에서 인용한 분석가 말처럼 위험의 핵심은 948이라는 숫자보다 업스트림 수정이 배포판 커널까지 내려오는 시간입니다. 업스트림에 패치가 들어갔다고 내 Ubuntu나 Amazon Linux 커널에 들어간 것은 아닙니다. 쓰는 배포판의 보안 공지와 백포트 일정을 확인하고, 커널 업데이트와 재부팅을 미루지 않는 운영 습관이 필요합니다. 컨테이너만 믿기보다 gVisor나 Firecracker 같은 추가 격리 계층을 검토할 이유도 커졌습니다.
+
+## 3. Meta, 코딩 에이전트 병렬 실행 앱 Conductor 인수
+
+**무슨 일인가요?**
+
+Conductor는 Claude Code, Codex 같은 외부 코딩 에이전트 여러 개를 각각 분리된 작업 공간에서 동시에 돌리게 해 주는 앱입니다. Mac 앱과 클라우드 서비스를 함께 제공했습니다. 11월 4일 Meta가 인수를 확인했고, 인수 금액은 공개되지 않았습니다. CEO Charlie Holtz는 Meta Superintelligence Labs의 Alexandr Wang, Nat Friedman과 함께 일하게 된다고 밝혔습니다.
+
+**사용자에게 남은 일정**
+
+- **11월 13일**: Conductor Cloud 작업 공간이 읽기 전용이 됩니다. 이전 대화는 보고 내보낼 수 있지만 새 메시지는 못 보냅니다.
+- **11월 20일**: 클라우드 서비스가 종료되고 사용자 데이터 삭제가 시작됩니다.
+- **Mac 앱**: 2027년 초까지 새 모델 지원과 치명적 버그 수정은 이어지지만, 그 뒤로는 종료 절차에 들어갑니다.
+- 신규 가입과 다운로드는 발표와 함께 막혔고, 기존 Pro 사용자는 무료로 Pro 기능을 유지하며 활성 구독자는 환불을 받습니다.
+
+내보내기는 설정의 계정 메뉴에서 전체 아카이브를 받거나, 클라우드 작업 공간을 로컬 Mac으로 옮기는 기능을 쓰면 됩니다.
+
+**개발자에게 왜 중요한가요?**
+
+여러 에이전트를 병렬로 돌리는 오케스트레이션 레이어는 작년부터 빠르게 늘어난 영역입니다. 그런데 이 레이어는 모델 회사가 아니라 작은 스타트업이 만드는 경우가 많아서, 이번처럼 인수와 함께 몇 주 만에 닫힐 수 있습니다. 작업 기록이나 프롬프트, 브랜치 상태가 특정 도구의 클라우드에만 쌓여 있다면 정기적으로 내보내 두고, 가능하면 git worktree 같은 표준 방식 위에서 돌아가는 도구를 고르는 편이 안전합니다.
+
+## 4. Anthropic FlashProve: 어떤 모델이 답했는지 증명하는 오픈소스 프로토타입
+
+**무엇인가요?**
+
+API로 모델을 쓰면 정말 요청한 모델이 답했는지 확인할 방법이 없습니다. 제공자가 비용을 아끼려고 더 작은 모델로 돌리거나, 추론 서버에 접근한 누군가가 출력을 바꿔도 알 수 없습니다. Anthropic Frontier Red Team이 EPFL, MIT, StarkWare와 함께 만든 **FlashProve**는 특정 응답이 특정 모델 가중치로 생성됐다는 암호학적 증명을 만들어 줍니다. 11월 4일 Apache 2.0 라이선스로 공개됐습니다.
+
+- 모델별로 한 번 가중치에 대한 커밋먼트를 만들고, 요청마다 증명을 따로 생성합니다.
+- 검증기는 일상용 C++ 버전과, 증명 보조기 Lean으로 작성한 느린 참조 버전 두 가지입니다. 프로토콜의 완전성, 건전성, 영지식 성질을 Lean으로 증명했습니다.
+- 테스트 모델은 Llama 4 Maverick(전체 4,000억, 토큰당 활성 약 170억 파라미터의 MoE 모델)입니다.
+
+Help Net Security가 정리한 성능 수치는 다음과 같습니다.
+
+- 증명 생성: H100 한 장에서 초당 약 110토큰, 80GB GPU 하나와 약 290GB 호스트 메모리 필요
+- 1,024토큰 응답의 증명 크기 약 18.78MB, 검증 시간 약 17초(24스레드)
+- 일반 vLLM 서빙 대비 GPU당 비용이 약 70~95배
+
+**개발자에게 왜 중요한가요?**
+
+당장 프로덕션에 쓸 수 있는 물건은 아닙니다. 오버헤드가 크고, 증명 생성기 자체는 형식 검증을 거치지 않았으며, 논문과 Lean 명세, 실제 코드가 일치한다는 보장도 하지 않는다고 스스로 밝혔습니다. 그래도 방향은 분명합니다. 여러 LLM 제공자와 라우터를 거쳐 모델을 쓰는 일이 늘수록, 응답이 어디서 왔는지 증명하는 문제는 TLS 인증서처럼 인프라의 한 층이 될 수 있습니다. 규제 산업에서 AI 응답의 출처를 감사해야 하는 팀이라면 저장소를 한 번 살펴볼 만합니다.
+
+## 마무리
+
+오늘 소식을 관통하는 말은 확인할 수 있어야 믿을 수 있다는 것입니다. 패치 일정은 미리 확인하고, 커널 수정은 내 배포판에 들어왔는지 확인하고, 쓰는 도구는 내일도 있을지 확인하고, 모델 응답은 출처를 확인하는 방향으로 가고 있습니다.
+
+## 참고 자료
+
+- [Wednesday, November 11, 2026 Security Releases (Node.js 블로그)](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases)
+- [Node.js Schedules High-Severity Security Fixes for 22.x, 24.x, and 26.x Release Lines (Cyber Security News)](https://cybersecuritynews.com/node-js-schedules-patch/)
+- [A thousand fewer paths to root (OpenAI)](https://openai.com/index/a-thousand-fewer-paths-to-root/)
+- [OpenAI built an AI pipeline to find, exploit and patch Linux flaws (CSO Online)](https://www.csoonline.com/article/4245265/openai-built-an-ai-pipeline-to-find-exploit-and-patch-linux-flaws.html)
+- [Meta acquires AI coding startup Conductor (TechCrunch)](https://techcrunch.com/2026/11/04/meta-acquires-ai-coding-startup-conductor/)
+- [Conductor Joins Meta and Will Shut Down Its Coding-Agent Cloud (Unite.AI)](https://www.unite.ai/conductor-joins-meta-and-will-shut-down-its-coding-agent-cloud/)
+- [Conductor 공식 사이트](https://www.conductor.build/)
+- [Anthropic open-sources FlashProve, its provable inference prototype for MoE models (Help Net Security)](https://www.helpnetsecurity.com/2026/11/04/anthropic-flashprove-provable-inference/)
+- [anthropics/FlashProve (GitHub)](https://github.com/anthropics/FlashProve)
