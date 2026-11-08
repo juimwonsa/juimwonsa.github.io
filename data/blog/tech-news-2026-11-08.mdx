@@ -1,0 +1,135 @@
+---
+title: '오늘의 IT 소식: Next.js 11월 보안 릴리스, GitHub Actions pull_request_target 기본 차단, Parcel 3 알파, Discord의 탈 Electron'
+date: '2026-11-08'
+tags: ['IT-News', 'Next.js', 'React', 'GitHub', 'Security', 'Electron', 'JavaScript', 'Open-Source']
+draft: false
+summary: 'use cache 기반 캐시가 다른 테넌트에 새는 문제 등 7건을 고친 Next.js 16.4.5와 15.5.29, 12월 2일부터 공개 저장소에서 pull_request_target을 기본 차단하는 GitHub Actions와 이번 주 첫 브라운아웃, Node 없이 Rust 바이너리 하나로 도는 Parcel 3 알파, 그리고 Electron을 버리고 Rust와 GPUI로 데스크톱 앱을 다시 만드는 Discord 소식을 정리합니다.'
+---
+
+이번 주말에는 당장 손을 봐야 할 두 가지와 길게 지켜볼 두 가지를 골랐습니다. Next.js로 멀티테넌트 서비스를 운영하거나 공개 저장소에서 GitHub Actions를 쓰고 있다면 앞의 두 소식을 먼저 확인하세요. 특히 GitHub Actions 쪽은 한국 시간으로 **11월 10일(화) 새벽**에 첫 차단 테스트가 있습니다.
+
+## 1. Next.js 16.4.5 / 15.5.29: 캐시 경계가 새는 문제 등 7건 수정
+
+**무엇이 나왔나요?**
+
+Next.js 팀이 11월 3일 예고했던 11월 보안 릴리스를 냈습니다. Active LTS인 **16.4.5**와 Maintenance LTS인 **15.5.29**에 수정이 들어갔고, 공개된 취약점은 HIGH 1건, MEDIUM 6건입니다. 지난번 RCE 패치(16.4.1)와 달리 원격 코드 실행은 아니지만, 대부분이 **다른 사용자나 테넌트의 데이터가 보이는 문제**라서 성격이 더 까다롭습니다.
+
+주요 항목을 묶어 보면 다음과 같습니다.
+
+- **Cache Components와 `use cache` 관련 4건**: 같은 공개 `use cache` 함수를 직접 호출하면서 `unstable_cache` 안에서도 호출하는 경우, 콜드 캐시를 채우는 순간 다른 루트 파라미터(예: 테넌트 ID)의 결과를 받아 저장할 수 있었습니다(HIGH). 중첩된 `use cache`, 서로 다른 바이너리 인자가 같은 캐시 키가 되는 문제, 셀프 호스팅 환경의 공유 셸 오염도 함께 고쳐졌습니다.
+- **Edge 라우트의 쿠키 노출**: Edge Route Handler나 Pages Router Edge API에서 `NextResponse.cookies.set()`으로 쿠키를 설정하면, 내부 헤더 `x-middleware-set-cookie`에 값이 실려 같은 오리진 JavaScript가 `HttpOnly` 쿠키도 읽을 수 있었습니다.
+- **압축 응답 프레이밍 문제**: 외부에서 받은 `Response`를 그대로 돌려주는 셀프 호스팅 앱이 HTTP/1.1 파이프라이닝을 쓰는 리버스 프록시 뒤에 있으면 응답이 다른 클라이언트에게 갈 수 있었습니다.
+- **이미지 최적화의 SVG 차단 우회**: 허용된 출처의 이미지를 AVIF로 오인하게 만들어 `images.dangerouslyAllowSVG: false` 설정을 피해 갈 수 있었습니다.
+
+**어떻게 대응하나요?**
+
+```bash
+npm install next@16.4.5    # 16.x
+npm install next@15.5.29   # 15.5.x
+
+# 실제로 잠긴 버전 확인
+npm ls next
+```
+
+- Cache Components를 켜고 루트 파라미터로 테넌트나 사이트, 로케일을 나누는 앱이라면 업그레이드 후 캐시를 한 번 비우는 것도 고려해 보세요. 이미 잘못 저장된 항목은 재검증되거나 밀려날 때까지 남아 있을 수 있기 때문입니다.
+- Edge 라우트에서 세션 같은 민감한 쿠키를 설정하고 있었다면, 이번 수정과 별개로 같은 오리진에 신뢰하지 않는 스크립트가 들어오지 않는지 점검해 두면 좋습니다.
+
+**개발자에게 왜 중요한가요?**
+
+`use cache`는 Next.js 16 세대에서 밀고 있는 캐싱 모델입니다. 편하게 붙일수록 캐시 키에 무엇이 들어가는지 의식하지 않게 되는데, 이번 이슈들은 바로 그 키 계산과 저장 시점의 허점이었습니다. 캐시에 사용자별 데이터를 넣는다면 캐시 키를 프레임워크에만 맡기지 말고 테스트로 한 번 확인해 두는 습관이 필요합니다.
+
+## 2. GitHub Actions, 12월 2일부터 공개 저장소의 pull_request_target 기본 차단
+
+**무엇이 바뀌나요?**
+
+GitHub이 11월 2일 변경 로그에서, 공개 저장소의 `pull_request_target` 이벤트를 **2026년 12월 2일부터 기본으로 차단**한다고 확정했습니다. 원래 11월 2일로 예고했던 날짜를 한 달 미룬 것입니다.
+
+- **대상**: GitHub Free, Team, Enterprise Cloud의 **공개 저장소**만입니다. 비공개·내부 저장소와 GitHub Enterprise Server는 해당하지 않습니다.
+- **지금 상태**: 기본 규칙이 평가(evaluate) 모드로 켜져 있습니다. 워크플로는 그대로 돌지만, 차단될 실행에는 경고가 붙습니다.
+- **브라운아웃**: 아래 두 번의 2시간 동안은 실제로 차단됩니다. 차단된 워크플로는 실행되지 않고 오류 주석만 남깁니다.
+  - 11월 9일 16:00~18:00 UTC (한국 시간 11월 10일 01:00~03:00)
+  - 11월 16일 16:00~18:00 UTC (한국 시간 11월 17일 01:00~03:00)
+- **계속 쓰려면**: Actions 이벤트 정책에서 `pull_request_target`을 명시적으로 허용해야 합니다. 워크플로 파일 단위로 대상을 좁혀 꼭 필요한 워크플로만 허용하라고 안내합니다.
+
+**왜 막나요?**
+
+`pull_request_target`은 포크에서 온 PR이라도 **베이스 저장소의 권한과 시크릿**으로 실행됩니다. 여기서 PR의 코드를 체크아웃해 빌드하거나 테스트하면, 외부인이 올린 코드가 시크릿에 접근할 수 있습니다. 흔히 pwn request라고 부르는 공격 경로입니다.
+
+**무엇을 확인해야 하나요?**
+
+```bash
+# 저장소에서 pull_request_target을 쓰는 워크플로 찾기
+grep -rln "pull_request_target" .github/workflows/
+```
+
+- 라벨 자동 지정, PR 코멘트 봇, AI 코드 리뷰 봇처럼 포크 PR에 쓰기 권한이 필요한 워크플로가 주로 이 트리거를 씁니다. 해당 워크플로가 있다면 브라운아웃 전에 Insights에서 차단 대상인지 확인하세요.
+- 신뢰할 수 없는 코드는 시크릿이 없는 `pull_request` 트리거에서 돌리고, 권한이 필요한 후속 작업만 별도 `workflow_run` 워크플로로 나누는 구성이 널리 쓰이는 대안입니다. 변경 로그가 직접 권하는 방법은 아니니 GitHub 보안 문서와 함께 검토하세요.
+- 정말 필요한 워크플로만 정책에서 허용하고, 그 워크플로 안에서는 PR 코드를 체크아웃해 실행하지 않는 것이 원칙입니다.
+
+## 3. Parcel 3 알파: Node 없이 Rust 바이너리 하나로
+
+**무엇이 나왔나요?**
+
+번들러 Parcel이 11월 4일 **Parcel 3 알파**를 공개했습니다. v2에서도 JS 컴파일러(SWC 기반)와 Lightning CSS 같은 부분은 이미 Rust였지만, 코어는 JavaScript로 남아 있었습니다. v3는 CLI, 개발 서버, 변환기, 번들러, 최적화기까지 **전부 네이티브 Rust**로 다시 썼고 Node.js가 필요 없습니다.
+
+공식 발표에 실린 핵심은 다음과 같습니다(벤치마크는 React Spectrum 기반 프로젝트에서 팀이 직접 잰 값입니다).
+
+- 콜드 개발 빌드가 v2 대비 약 29~108배 빠르고, 메모리는 2.5~6.6배 적게 씁니다.
+- 바이너리 크기는 30MB 미만이고 npm 의존성이 없습니다.
+- Tailwind(PostCSS 없이), React Compiler, MDX, SVG를 JSX로 바꾸기, 글롭 import를 기본 지원합니다.
+- 플러그인은 C ABI를 쓰는 네이티브 동적 라이브러리로 만들 수 있고 Rust, Go, Swift SDK가 있습니다. 기존 JS 플러그인은 내장 QuickJS 런타임에서 돌며, 이 런타임은 의도적으로 네트워크 접근이 없습니다.
+- 디스크 캐시를 대부분 없애고 빠른 콜드 빌드와 메모리 내 증분 빌드에 기대는 쪽을 택했습니다.
+
+**어떻게 써 보나요?**
+
+```bash
+# 알파 설치
+npm install -D parcel@next
+
+# 기존 Parcel 2와 나란히 시험해 보기
+npm install -D @parcel/parcel3
+npx parcel3 src/index.html
+```
+
+**주의할 점**
+
+- 알파라서 `.d.ts` 생성, 압축 플러그인, 커스텀 번들러 플러그인, 프로그래밍용 JS API가 아직 없습니다. TypeScript 라이브러리 빌드에는 아직 이릅니다.
+- `.babelrc`, `.postcssrc` 같은 개별 설정이 `.parcelrc`로 모이고, JavaScript 출력에서 스코프 호이스팅이 빠졌습니다. 마이그레이션 가이드를 먼저 읽어 보세요.
+- QuickJS는 V8보다 느려서, 자주 호출되는 무거운 JS 플러그인은 체감 속도가 떨어질 수 있습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Vite(Rolldown), Rspack, Turbopack에 이어 Parcel까지 코어를 네이티브로 옮기면서, JS 빌드 도구가 JS로 작성되던 시대는 사실상 끝나 가고 있습니다. 당장 Parcel로 갈아탈 이유는 적더라도, Node 설치 없이 단일 바이너리로 도는 번들러는 CI 이미지나 Electron 앱 빌드 환경을 가볍게 만드는 데 참고할 만한 방향입니다.
+
+## 4. Discord, Electron을 버리고 Rust와 GPUI로 데스크톱 앱 재작성
+
+**무엇이 발표됐나요?**
+
+Discord 공동 창업자이자 CTO인 Stanislav Vishnevskiy가 X에서 데스크톱 클라이언트를 **Rust로 다시 만들고 있다**고 밝혔습니다. Windows Latest 등의 보도를 정리하면 다음과 같습니다.
+
+- UI는 Zed 에디터 팀이 만든 Rust GUI 프레임워크 **GPUI**로 그립니다. Tauri가 아니라고 직접 못 박았습니다. 즉 웹뷰 위에 기존 웹 UI를 올리는 방식이 아닙니다.
+- 데스크톱에서는 Electron과 React Native가 모두 빠집니다. 모바일은 네이티브 UI를 유지하되 앱 로직을 Rust로 데스크톱과 공유합니다.
+- 공개된 초기 Windows 11 빌드 스크린샷에서 메모리 사용량은 약 290MB였습니다. 기존 Electron 클라이언트는 상황에 따라 수 GB까지 늘어난다는 불만이 많았습니다.
+- 출시 일정은 공개되지 않았습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Discord는 Slack, VS Code와 함께 Electron의 대표 사례였습니다. 그런 앱이 떠난다는 것은 Electron의 메모리 비용이 대규모 사용자 앱에서는 결국 넘어야 할 문제가 된다는 신호입니다. 다만 이것을 곧바로 Electron을 버려야 한다는 뜻으로 읽을 필요는 없습니다. Discord는 수년간 네이티브 쪽 투자를 해 온 대형 조직이고, 290MB도 아직 초기 빌드의 스크린샷 한 장일 뿐입니다. Electron 앱을 만드는 입장에서 현실적인 교훈은 두 가지입니다.
+
+- 렌더러 프로세스와 숨겨진 창, 메모리 누수를 주기적으로 측정해서, 사용자가 체감하기 전에 수치로 관리하세요.
+- 비즈니스 로직을 UI에서 분리해 두면, 나중에 UI 기술을 바꿀 때 Discord처럼 코어를 재사용할 길이 열립니다.
+
+## 마무리
+
+오늘 소식은 모두 기본값이 바뀌는 이야기입니다. 캐시가 알아서 해 주던 경계, Actions가 기본으로 허용하던 트리거, 빌드 도구가 깔고 있던 Node, 데스크톱 앱이 당연히 쓰던 Electron까지, 익숙한 기본값을 한 번씩 의심해 볼 때입니다.
+
+## 참고 자료
+
+- [November 2026 Security Release (Next.js 블로그)](https://nextjs.org/blog/november-2026-security-release)
+- [GHSA-mfr8-8qww-v76h: Cross-tenant cache disclosure (vercel/next.js)](https://github.com/vercel/next.js/security/advisories/GHSA-mfr8-8qww-v76h)
+- [pull_request_target blocked by default December 2 (GitHub Changelog)](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2)
+- [Control workflow execution (GitHub Docs)](https://docs.github.com/actions/how-tos/administer/control-workflow-execution)
+- [Announcing Parcel 3 alpha (Parcel 블로그)](https://v3.parceljs.org/blog/v3-alpha)
+- [Parcel 2에서 마이그레이션하기 (Parcel 3 문서)](https://v3.parceljs.org/migration/parcel-2/)
+- [Discord is killing its Electron app, and the Rust rebuild uses just 290MB (Windows Latest)](https://www.windowslatest.com/2026/11/05/discord-is-killing-its-electron-app-that-can-eat-4gb-of-ram-on-windows-11-and-the-rust-rebuild-uses-just-290mb/)
+- [Discord Is Rebuilding Its Desktop App in Rust (gHacks)](https://www.ghacks.net/2026/11/06/discord-is-rebuilding-its-desktop-app-in-rust-with-the-new-client-using-290-mb-of-ram/)
