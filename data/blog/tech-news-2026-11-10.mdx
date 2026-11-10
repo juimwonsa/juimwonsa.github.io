@@ -1,0 +1,148 @@
+---
+title: '오늘의 IT 소식: Claude Fable 5.2와 Mythos 5.2, 설치 훅 없는 PolinRider npm 악성 릴리스, Codex CLI 0.167, Gemini 2.5 자동 전환 예고'
+date: '2026-11-10'
+tags: ['IT-News', 'AI', 'AI-Agent', 'npm', 'Security', 'Supply-Chain', 'Firebase']
+draft: false
+summary: '가격을 20% 내리고 속도를 높인 Claude Fable 5.2와 Mythos 5.2, install 스크립트를 꺼도 막을 수 없는 PolinRider 로더가 심긴 npm 패키지 12개 릴리스, 에이전트 커맨드 센터를 넣은 Codex CLI 0.167, 그리고 12월 1일부터 Gemini 2.5 Pro와 Flash 요청을 새 모델로 돌리는 Gemini Developer API와 Firebase AI Logic 소식을 정리합니다.'
+---
+
+이번 주는 새 모델 발표로 시작합니다. 다만 오늘 고른 네 가지 중 실제로 일정을 잡아야 하는 것은 뒤쪽 두 개입니다. npm 의존성에 처음 보는 사내 스택 패키지가 섞여 있거나, Firebase AI Logic으로 Gemini 2.5를 호출하는 앱이 있다면 3번과 4번을 먼저 읽어 보세요.
+
+## 1. Claude Fable 5.2와 Mythos 5.2: 더 빠르고 20% 저렴해진 상위 모델
+
+**무엇이 나왔나요?**
+
+Anthropic이 11월 9일(미국 시간) Claude Fable 5.2와 Claude Mythos 5.2를 공개했습니다. 두 모델은 같은 기반 모델을 공유하며, 일반에 공개되는 Fable은 사이버보안·생물학 분야 안전장치가 들어간 버전이고 Mythos는 그 제한이 없는 버전입니다. Mythos는 Anthropic의 사이버 검증(Cyber Verification)·생명과학 프로그램, 그리고 Enterprise 요금제의 Claude Security를 통해서만 쓸 수 있습니다.
+
+**핵심 내용**
+
+- **API 모델 ID**: `claude-fable-5-2`. Claude Platform과 Claude Code에서 바로 쓸 수 있고, AWS, Google Cloud, Microsoft Foundry로도 제공됩니다.
+- **가격**: 100만 토큰당 입력 8달러, 출력 40달러로 Fable 5.1(10달러/50달러)보다 20% 내렸습니다. 캐시 읽기는 100만 토큰당 0.20달러입니다.
+- **빠른 모드**: 토큰 생성 속도를 최대 2.5배 높이는 대신 입력 16달러, 출력 80달러로 두 배 가격입니다. Claude Code, Claude Platform, Google Cloud, Microsoft Foundry에서 지원합니다.
+- **성능**: 5.1보다 출력이 최대 30% 빠르고, 어려운 작업을 medium effort로 돌릴 때 토큰을 덜 쓴다고 합니다. 공개된 벤치마크에서는 에이전트 코딩(FrontierSWE v2) 56.3%에서 69.9%로, 컴퓨터 사용(OSWorld 2.1) 83.5%에서 89.3%로 올랐습니다.
+- **안전장치**: 안전장치에 걸린 사이버보안·생물학 질의는 덜 강력한 모델로 자동으로 넘어갑니다. MacRumors에 따르면 차단 빈도는 5.1보다 약 55% 줄었습니다.
+- **구독 사용량**: Pro 요금제와 Team 표준 좌석에서는 Fable 사용이 주간 한도의 최대 50%까지 차감됩니다. 이번 주에는 가입 기간에 따라 사용량 초기화를 1~3회 추가로 준다고 합니다.
+
+**개발자에게 왜 중요한가요?**
+
+Anthropic은 대부분의 코딩·지식 작업은 Opus 5.5로 시작하고, 더 길고 열린 형태의 작업에서만 Fable이나 Mythos로 올리라고 안내합니다. 즉 Fable 5.2는 기본값이 아니라 어려운 작업에 꺼내는 모델입니다. 에이전트 파이프라인에서 모델을 단계별로 나눠 쓰고 있다면, 계획·설계처럼 실패 비용이 큰 단계만 Fable로 바꾸고 반복 작업은 그대로 두는 식으로 비용 대비 효과를 측정해 보는 것이 좋습니다.
+
+```ts
+import Anthropic from '@anthropic-ai/sdk'
+
+const client = new Anthropic()
+
+const res = await client.messages.create({
+  model: 'claude-fable-5-2',
+  max_tokens: 4096,
+  messages: [{ role: 'user', content: '이 모노레포의 빌드 시간을 줄일 계획을 세워 줘' }],
+})
+```
+
+**주의할 점**
+
+- 벤치마크 수치는 모두 Anthropic이 직접 공개한 값입니다. 자기 코드베이스에서의 결과는 별도로 확인해야 합니다.
+- 보안 도구를 만드는 팀이라면 질의가 덜 강력한 모델로 넘어가는 경우를 고려해야 합니다. 같은 프롬프트라도 결과 품질이 달라질 수 있으니, 필요하면 검증 프로그램 신청을 검토하세요.
+
+## 2. PolinRider 로더가 심긴 npm 패키지: install 스크립트를 꺼도 소용없습니다
+
+**무슨 일이 있었나요?**
+
+Sonatype이 11월 4일 공개하고 GBHackers 등이 11월 9일 이어 보도한 사건입니다. npm 패키지 10개, 12개 릴리스에 PolinRider 계열 로더가 들어간 채로 배포됐습니다. 대상은 `@adminide-stack/*` 계열 여러 개와 `server-hemera-mongo`, `cdeops`, `@cdmbase/wiki-browser`, `@pubngo-stack/help-browser` 등입니다. 다운로드 수가 많은 유명 패키지는 아니지만, 공격 방식이 흔히 쓰는 방어책을 비켜 간다는 점에서 눈여겨볼 만합니다.
+
+**핵심 내용**
+
+- **설치 훅이 없습니다**: `install`이나 `postinstall` 스크립트를 쓰지 않습니다. 대신 패키지의 진입 파일(예: `cdeops`의 `client.js`, `server-hemera-mongo`의 `dist/main.js`)에 코드를 넣어, 앱이 그 모듈을 불러오는 순간 실행됩니다. 따라서 `npm install --ignore-scripts`나 `ignore-scripts=true` 설정으로는 막을 수 없습니다.
+- **이더리움을 연락처로 씁니다**: 로더는 공개 이더리움 RPC에서 특정 지갑이 보낸 트랜잭션을 찾고, 수신 주소의 바이트에서 C2 서버 IP를 꺼냅니다. 공격자는 새 트랜잭션 하나로 서버 주소를 바꿀 수 있어서, IP 하나를 막아도 로더가 다음 주소를 찾아갑니다.
+- **실행 방식**: 443 포트로 TLS 없이 평문 HTTP 요청을 보내 XOR로 감싼 코드를 받고, 앱 프로세스 안의 `eval`과 분리된 `node -i` 프로세스에서 실행합니다. 후속 단계에서는 원격 접속 트로이목마와 지속성 장치를 설치하며, VS Code, Cursor, Discord, GitHub Desktop 같은 데스크톱 앱의 시작 파일도 노린다고 보도됐습니다.
+- **ESM과 CommonJS 차이**: `cdeops`는 CommonJS 경로에서만 감염된 파일에 닿고 ESM import는 다른 파일로 연결됩니다. 패키지가 설치돼 있다는 사실만으로 실행 여부를 단정할 수 없다는 뜻입니다.
+
+**어떻게 확인하나요?**
+
+```bash
+# 잠금 파일과 설치 트리에서 해당 이름 찾기
+npm ls cdeops server-hemera-mongo @cdmbase/wiki-browser @pubngo-stack/help-browser
+grep -E '"(@adminide-stack|@cdmbase|@pubngo-stack)/|"cdeops"|"server-hemera-mongo"' package-lock.json
+```
+
+- 사내 npm 미러나 캐시, 빌드 기록까지 함께 확인하세요.
+- 해당 코드가 실행된 호스트라면 감염됐다고 보고 격리한 뒤, 접근 가능했던 npm 게시 토큰, Git 자격 증명, 클라우드 키, CI 시크릿을 교체해야 합니다. 패키지를 지우는 것만으로는 이미 설치된 지속성 장치가 사라지지 않습니다.
+
+**개발자에게 왜 중요한가요?**
+
+최근 공급망 공격 대응은 install 스크립트 차단에 많이 기대 왔습니다. 이번 사례는 그 방어가 출발점일 뿐이라는 것을 보여 줍니다. 런타임에 불러오는 코드 자체가 오염되면 결국 의존성 버전을 고정하고, 새 버전이 들어올 때 내용을 검토하거나 일정 기간 숙성시킨 뒤 받는 정책이 필요합니다.
+
+## 3. Codex CLI 0.167: 여러 에이전트를 한눈에 보는 커맨드 센터
+
+**무엇이 나왔나요?**
+
+OpenAI가 11월 6일 Codex CLI `rust-v0.167.0`을 내놓았습니다. 변경 PR이 200개 가까이 되는 큰 릴리스로, 여러 에이전트 세션을 동시에 다루는 기능에 무게가 실렸습니다.
+
+**핵심 내용**
+
+- **에이전트 커맨드 센터**: `codex agents --no-daemon`으로 엽니다. 결과를 아직 확인하지 않은 세션에 표시가 붙어서, 여러 작업을 병렬로 돌릴 때 무엇이 끝났는지 찾기 쉬워졌습니다.
+- **제공자 전환**: 세션 선택 화면에서 연결된 모델 제공자를 바꿔도 작성 중인 입력이 사라지지 않고, 저장된 대화도 그대로 보입니다.
+- **로그인 옵션 정리**: API 키와 클라우드 제공자 로그인이 별도 메뉴로 모였고, Google Cloud Vertex AI 설정 마법사가 실험 기능으로 들어왔습니다.
+- **네트워크 승인 개선**: 같은 엔드포인트에 동시에 요청이 몰리면 승인 창을 하나씩 띄우고, 요청이 끝나면 창을 자동으로 닫습니다. macOS·Windows 시스템 프록시 지원은 `/experimental`에서 켤 수 있습니다.
+- **기타**: 실패한 응답까지 계산에 넣는 자동 컨텍스트 압축, 터미널 이미지 미리보기, Linux musl 빌드의 유휴 메모리 감소 등이 포함됐습니다.
+
+**개발자에게 왜 중요한가요?**
+
+코딩 에이전트 도구들이 한 세션을 잘 돌리는 단계에서 여러 세션을 관리하는 단계로 넘어가고 있습니다. 지난주 Meta의 Conductor 인수와도 같은 흐름입니다. 사내 프록시 뒤에서 Codex를 쓰지 못했던 팀이라면 시스템 프록시 실험 기능을 시험해 볼 만합니다.
+
+```bash
+npm install -g @openai/codex@latest
+codex --version
+codex agents --no-daemon
+```
+
+## 4. Gemini 2.5 Pro·Flash, 12월 1일부터 새 모델로 자동 전환
+
+**무엇이 바뀌나요?**
+
+Firebase AI Logic 모델 문서와 11월 2일자 Firebase 릴리스 노트에 따르면, **Gemini Developer API**로 들어오는 Gemini 2.5 요청이 **2026년 12월 1일부터** 새 모델로 넘어갑니다.
+
+- `gemini-2.5-pro` 요청은 `gemini-3.8-flash`로 처리됩니다.
+- `gemini-2.5-flash` 요청은 `gemini-3.5-flash-lite`로 처리됩니다.
+- `gemini-2.5-flash-lite`는 Developer API 쪽에서는 바뀌지 않습니다.
+- 과금도 바뀐 모델의 요금으로 계산됩니다.
+- Vertex AI 계열(문서상 Agent Platform Gemini API)에서는 세 모델 모두 이미 10월 20일에 종료됐습니다.
+
+**왜 주의해야 하나요?**
+
+모델 이름을 바꾸지 않아도 요청은 계속 성공하는 것처럼 보이지만, 동작은 달라질 수 있습니다. 릴리스 노트에 나온 주의점은 다음과 같습니다.
+
+- `gemini-3.8-flash`에서는 frequency penalty, presence penalty, candidate count 같은 일부 파라미터를 지원하지 않아 400 오류가 납니다.
+- Gemini 3.x 모델은 temperature, top-K, top-P를 무시합니다.
+- 모델 턴을 미리 채워 넣는 방식(prefill)과 `gemini-3.8-flash`의 MINIMAL 사고 수준은 실패합니다.
+- `thinkingBudget` 대신 `thinkingLevel`로 옮기라고 안내합니다.
+
+**어떻게 대응하나요?**
+
+```ts
+import { getAI, getGenerativeModel, GoogleAIBackend } from 'firebase/ai'
+
+const ai = getAI(app, { backend: new GoogleAIBackend() })
+
+// 'gemini-2.5-pro' 대신 대상 모델을 직접 지정하고 미리 테스트
+const model = getGenerativeModel(ai, { model: 'gemini-3.8-flash' })
+```
+
+- 코드에서 `gemini-2.5` 문자열을 검색하고, Remote Config로 모델 이름을 관리하고 있다면 그 값도 확인하세요.
+- `generationConfig`에 penalty나 `candidateCount`를 넣고 있다면 12월 전에 빼야 합니다.
+- 출력 길이나 말투에 의존하는 화면(요약 카드, JSON 파싱 등)은 새 모델로 미리 돌려 보는 것이 안전합니다. 모바일 앱은 배포에 시간이 걸리므로 일정을 넉넉히 잡으세요.
+
+## 마무리
+
+오늘 소식을 묶으면 기본값이 조용히 바뀌는 시대라는 말로 정리됩니다. 모델은 이름만 같고 속은 바뀌고, 패키지는 설치 스크립트 없이도 코드를 실행합니다. 결국 어떤 모델과 어떤 코드가 실제로 돌고 있는지 직접 고정하고 확인하는 습관이 가장 확실한 방어입니다.
+
+## 참고 자료
+
+- [Claude Fable 5.2 (Anthropic)](https://www.anthropic.com/claude/fable)
+- [Claude Fable 5.2 and Mythos 5.2 (Anthropic)](https://www.anthropic.com/claude-fable-and-mythos-5-2)
+- [Anthropic Launches Claude Fable 5.2 and Mythos 5.2 (MacRumors)](https://www.macrumors.com/2026/11/09/anthropic-launches-claude-fable-5-2/)
+- [PolinRider Loader Reappears in Hijacked npm Packages (Sonatype)](https://www.sonatype.com/blog/polinrider-loader-reappears-in-hijacked-npm-packages)
+- [PolinRider Malware Returns in 10 Hijacked npm Packages (GBHackers)](https://gbhackers.com/polinrider-malware-attack/)
+- [openai/codex rust-v0.167.0 릴리스 (GitHub)](https://github.com/openai/codex/releases/tag/rust-v0.167.0)
+- [Firebase AI Logic 지원 모델 문서](https://firebase.google.com/docs/ai-logic/models)
+- [Firebase 릴리스 노트](https://firebase.google.com/support/releases)
