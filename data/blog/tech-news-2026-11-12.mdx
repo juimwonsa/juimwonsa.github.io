@@ -1,0 +1,136 @@
+---
+title: '오늘의 IT 소식: Node.js 11월 보안 릴리스 16건, Git 2.56.1 보안 패치, Chrome 올해 여덟 번째 제로데이, Modern Web Guidance 1.0'
+date: '2026-11-12'
+tags: ['IT-News', 'Node.js', 'Security', 'Git', 'Chrome', 'Electron', 'AI-Agent', 'Frontend']
+draft: false
+summary: 'HTTP/2와 TLS 취약점 16건을 고친 Node.js 26.13.1·24.22.3·22.23.5, 재귀 클론 중 코드 실행이 가능했던 Git 취약점 6건을 고친 Git 2.56.1, 실제 공격에 쓰인 Chrome XML 제로데이, 그리고 Edge와 Firefox가 합류해 1.0이 된 AI 코딩 에이전트용 Modern Web Guidance를 정리합니다.'
+---
+
+오늘은 업데이트할 것이 많은 날입니다. 지난번에 예고 소식으로 전해 드린 Node.js 보안 릴리스가 실제로 나왔고, 같은 주에 Git과 Chrome도 보안 패치를 내놓았습니다. 개발 머신, CI 이미지, 서버, Electron 앱까지 한 번에 점검할 목록이 생긴 셈입니다. 마지막으로 AI 코딩 에이전트가 낡은 프런트엔드 코드를 쓰지 않도록 돕는 Modern Web Guidance 1.0 소식도 담았습니다.
+
+## 1. Node.js 11월 보안 릴리스: 26.13.1, 24.22.3, 22.23.5
+
+**무엇이 나왔나요?**
+
+11월 4일 사전 공지됐던 Node.js 보안 릴리스가 11월 11일(UTC) 공개됐습니다. 지원 중인 세 라인 모두 패치가 나왔고, 수정 버전은 **26.13.1**, **24.22.3**, **22.23.5**입니다. 공개 정리에 따르면 CVE는 모두 16건(High 7, Medium 6, Low 3)입니다.
+
+**핵심 내용**
+
+- **HTTP/2가 가장 큰 비중을 차지합니다**: 세션 종료 시 assertion으로 서버가 죽는 문제(CVE-2026-123863), 스트림 정리 과정의 use-after-free로 해제된 메모리가 상대에게 전송되는 문제(CVE-2026-123866), `respondWithFile()` 스트림이 쓰기 도중 리셋될 때의 use-after-free(CVE-2026-123874), 프로토콜 오류 후 메모리와 파일 디스크립터가 새는 문제(CVE-2026-123865) 등이 High로 분류됐습니다.
+- **HTTPS 메모리 노출**: 길이가 0인 쓰기가 재진입을 일으켜, 다른 연결의 힙 메모리가 요청 본문에 섞여 들어갈 수 있는 문제(CVE-2026-123864)가 고쳐졌습니다. 일부 정리에서는 TLS 개인 키까지 노출될 수 있다고 설명합니다.
+- **TLS와 mTLS 인증 우회**: TLS 1.2 재협상 중 servername을 바꿔, 덜 엄격한 호스트에서 받은 클라이언트 인증서 인증을 더 엄격한 호스트로 끌고 가는 문제(CVE-2026-123872, CVSS 8.1)가 있습니다. SNI 컨텍스트별 mTLS 설정이 기본 CA로 되돌아가는 문제(CVE-2026-123867)와 `https.Agent`의 TLS 세션 재사용 문제(CVE-2026-123877)도 Medium으로 함께 수정됐습니다.
+- **그 밖의 수정**: 프록시 설정이 잘못됐을 때 오류 메시지에 프록시 자격 증명이 찍히는 문제(CVE-2026-123871), Permission Model의 경로 매칭 문제 등이 포함됐습니다. 의존성으로는 llhttp, undici, sqlite 등이 업데이트됐습니다.
+
+**개발자에게 왜 중요할까요?**
+
+이번 수정은 대부분 네트워크 계층, 그중에서도 HTTP/2와 TLS 서버에 몰려 있습니다. Node.js로 HTTPS나 HTTP/2 서버를 직접 띄우거나, 클라이언트 인증서 기반 mTLS를 쓰고 있다면 우선순위를 높여 올리는 것이 좋습니다. 반대로 리버스 프록시 뒤에서 평문 HTTP/1.1만 받는 서비스는 노출 면이 상대적으로 작지만, 프록시 자격 증명 노출 같은 항목은 여전히 해당될 수 있습니다.
+
+```bash
+node -v
+# 26.13.1 / 24.22.3 / 22.23.5 이상인지 확인
+
+# nvm 사용 시
+nvm install 24.22.3 && nvm alias default 24.22.3
+```
+
+**주의할 점**
+
+- Dockerfile의 `node:24` 같은 태그는 이미지를 다시 받아 빌드해야 반영됩니다. CI 캐시에 남은 이전 베이스 이미지를 확인하세요.
+- 수명이 끝난 20.x, 25.x 라인에는 패치가 나오지 않습니다.
+- Electron 앱 개발자라면 Electron이 내장한 Node.js 버전도 봐야 합니다. Electron 릴리스 페이지 기준으로 11월 10일 나온 안정 버전 45.3.0과 44.11.1은 Node.js 24.22.2를 내장하고 있어, 이번 수정이 담긴 Electron 릴리스가 나오는지 지켜봐야 합니다.
+
+## 2. Git 2.56.1: 재귀 클론만으로 코드가 실행될 수 있던 취약점 등 6건 수정
+
+**무슨 일이 있었나요?**
+
+Git 프로젝트가 11월 10일 보안 릴리스를 내고 취약점 6건을 고쳤습니다. 최신 버전은 **Git 2.56.1**이며, 2.50.2부터 2.55.1까지 이전 시리즈에도 백포트가 나왔습니다.
+
+**핵심 내용**
+
+- **CVE-2026-111760 (가장 심각)**: 인덱스 처리 중 정수 잘림(truncation) 때문에, 매우 긴 경로가 안전 검사를 통과한 뒤 더 짧은 이름으로 기록될 수 있었습니다. 이를 악용하면 서브모듈의 `.git` 파일을 악성 훅이나 설정을 가리키는 심볼릭 링크로 바꿔, `git clone --recursive` 도중 공격자 코드가 실행될 수 있습니다.
+- **CVE-2026-113408**: 프로토콜 v2로 빈 저장소를 클론할 때 서버가 알려 주는 HEAD 대상 이름을 검증하지 않아, 경로 탐색으로 refs 디렉터리 밖에 파일을 쓸 수 있었습니다.
+- **메모리 문제 3건**: GPG 서명이 세 개 이상 붙은 태그를 병합할 때의 스택 오버플로(CVE-2026-114467), 디코딩 후 크기를 확인하지 않은 바이너리 패치의 범위 밖 읽기(CVE-2026-114469), 충돌이 많은 거대한 병합에서의 힙 손상(CVE-2026-105437)입니다.
+- **`git fast-import`**: 입력 스트림으로 넘어온 일부 기능이 임의 파일을 읽거나 쓸 수 있어, 이제는 `--allow-unsafe-features`를 명시하지 않으면 거부됩니다.
+
+**개발자에게 왜 중요할까요?**
+
+처음 보는 저장소를 서브모듈까지 한 번에 클론하는 일은 개발자에게 아주 흔합니다. 오픈소스 예제를 받아 보거나, AI 에이전트가 저장소를 대신 클론하게 하는 경우도 마찬가지입니다. 클론 한 번이 곧 코드 실행이 될 수 있다는 점에서 1번 취약점은 꼭 막아 두어야 합니다. 병합 관련 취약점은 PR을 대신 병합하거나 `git merge-tree`로 충돌 검사를 하는 자체 Git 서버를 운영하는 팀에게 특히 중요합니다.
+
+```bash
+git --version
+# 2.56.1 (또는 사용 중인 시리즈의 패치 버전) 이상인지 확인
+```
+
+**주의할 점**
+
+- GitHub.com과 GitHub Enterprise Cloud는 이미 패치됐고, GitHub Enterprise Server는 3.19.15, 3.20.11, 3.21.9, 3.22.4로 올려야 합니다.
+- GitHub Desktop, IDE, CI 러너 이미지처럼 Git을 자체 번들로 들고 다니는 도구는 OS의 Git을 올려도 그대로일 수 있습니다. 보도 시점 기준으로 Git for Windows의 2.56.1 기반 릴리스는 확인되지 않았습니다.
+- 당장 올릴 수 없다면 신뢰할 수 없는 저장소의 재귀 클론, 신뢰할 수 없는 태그 병합, 출처 모를 바이너리 패치 적용을 피하세요. 다만 이는 임시 방편일 뿐입니다.
+
+## 3. Chrome, 실제 공격에 쓰인 XML 제로데이 패치: 올해 여덟 번째
+
+**무엇이 나왔나요?**
+
+Google이 11월 9일(현지 시각) Chrome 보안 업데이트를 배포했습니다. 고친 취약점은 XML 처리 컴포넌트의 use-after-free인 **CVE-2026-125350**이며, Google은 이 취약점을 노린 익스플로잇이 실제로 존재한다고 밝혔습니다. 올해 들어 실제 공격이 확인된 Chrome 제로데이로는 여덟 번째입니다.
+
+**핵심 내용**
+
+- 수정 버전은 Windows와 macOS가 157.0.8103.50/.51, Linux가 157.0.8103.50입니다.
+- 공격 방식이나 공격 주체는 공개되지 않았습니다. 대부분의 사용자가 업데이트할 때까지 세부 정보는 제한될 수 있습니다.
+- Edge, Brave, Opera, Vivaldi 같은 Chromium 기반 브라우저도 각 업체의 패치가 나오는 대로 적용해야 합니다.
+
+**개발자에게 왜 중요할까요?**
+
+개발자 본인의 브라우저 업데이트는 재시작 한 번이면 끝납니다. 더 신경 쓸 곳은 Chromium을 품고 배포되는 것들입니다. Electron 앱, Playwright나 Puppeteer가 내려받는 테스트용 브라우저, 헤드리스 Chrome으로 PDF나 스크린샷을 만드는 서버가 여기에 해당합니다. 특히 서버에서 외부 URL이나 사용자가 올린 문서를 헤드리스 브라우저로 여는 서비스라면, 신뢰할 수 없는 입력을 그대로 렌더링하고 있다는 점을 다시 생각해 볼 때입니다.
+
+**주의할 점**
+
+- Electron 릴리스 페이지 기준으로 현재 안정 버전 45.3.0은 Chromium 156 계열입니다. Electron은 상위 Chromium의 보안 수정을 기존 메이저 버전에 백포트하는 경우가 많으니, 다음 Electron 릴리스 노트에 이 CVE가 언급되는지 확인하세요.
+- 데스크톱 앱이라면 자동 업데이트 경로가 실제로 동작하는지도 함께 점검해 두는 것이 좋습니다. 패치된 Electron으로 빌드해도 사용자에게 닿지 않으면 소용이 없습니다.
+
+## 4. Modern Web Guidance 1.0: AI 코딩 에이전트에게 요즘 웹 표준을 가르치는 스킬 모음
+
+**무엇인가요?**
+
+Chrome 팀이 5월 Google I/O에서 프리뷰로 공개했던 Modern Web Guidance가 1.0이 됐습니다. AI 코딩 에이전트가 몇 년 전 방식의 프런트엔드 코드를 쓰지 않도록, 최신 웹 플랫폼 기능과 브라우저 호환성 정보, 모범 사례를 스킬 형태로 제공하는 프로젝트입니다. 이번 1.0에서는 Microsoft Edge와 Mozilla가 합류해 거버넌스에 참여합니다.
+
+**핵심 내용**
+
+- **설치**: 프로젝트 디렉터리에서 아래 명령을 실행하면 됩니다. Claude Code, Copilot CLI, Antigravity CLI, Vercel의 skills 도구 등 주요 에이전트의 플러그인 마켓플레이스로도 설치할 수 있습니다. 프리뷰 사용자는 `update` 명령으로 올리면 됩니다.
+
+```bash
+npx modern-web-guidance@latest install
+# 프리뷰 버전을 쓰던 경우
+npx modern-web-guidance@latest update
+```
+
+- **기존 코드 감사(audit)**: 1.0에서 새로 생긴 기능입니다. HTML, CSS, JavaScript와 package.json을 정적으로 훑어 안전하게 현대화할 수 있는 지점을 찾고, 에이전트가 그 변경을 진행하도록 안내합니다. 다만 정해진 패턴 위주로 찾는 방식이라 모든 레거시 코드를 잡아내지는 않습니다.
+- **다루는 영역**: 새 UI 구현(CSS Anchor Positioning, 컨테이너 쿼리 등), 레거시 코드 전환(커스텀 모달을 네이티브 `<dialog>`로, 툴팁을 Popover API로), 보안(패스키 로그인, CSP 초안), 성능(INP와 LCP 개선, 링크 호버 시 페이지 미리 불러오기)입니다.
+- **검수 절차**: 각 가이드는 해당 분야 기술 리드가 검토하고, 사용자에게 보이는 기능은 보조 기술을 쓰는 전문가의 접근성 검토도 거친다고 합니다.
+- **Baseline 기준**: 기본 목표는 Baseline Widely available이며, `AGENTS.md`나 `CLAUDE.md` 같은 에이전트 지침 파일에 프로젝트의 Baseline 목표 연도를 적어 바꿀 수 있습니다.
+
+**개발자에게 왜 중요할까요?**
+
+React 프로젝트에서 에이전트에게 모달이나 툴팁을 만들어 달라고 하면, 여전히 무거운 포지셔닝 라이브러리와 타이머 기반 애니메이션 동기화 코드를 들고 오는 경우가 많습니다. 학습 데이터에 그런 코드가 훨씬 많기 때문입니다. 브라우저 벤더가 직접 검수한 지식을 에이전트에 붙여 주면, 지원 범위 안에서 네이티브 API를 먼저 쓰게 만들 수 있습니다. 번들 크기와 접근성 모두에 이득입니다.
+
+**주의할 점**
+
+- 지원해야 하는 브라우저 범위가 넓은 서비스라면 Baseline 목표를 지침 파일에 분명히 적어 두세요. 그렇지 않으면 에이전트가 기본값을 기준으로 판단합니다.
+- 거버넌스에 Apple 자리는 없습니다. Safari 관련 판단은 Baseline 데이터에 기대게 되므로, 실제 기기 테스트는 여전히 필요합니다.
+
+## 마무리
+
+오늘 소식은 결국 같은 질문으로 모입니다. 내 코드가 실제로 돌아가는 런타임, Git, 브라우저는 누가 언제 올리고 있나요? Node.js와 Chromium을 품은 Electron 앱, Git을 따로 번들한 도구처럼 업데이트가 한 단계 늦게 도착하는 곳을 미리 파악해 두는 팀이 이런 주에 가장 덜 바쁩니다.
+
+## 참고 자료
+
+- [Node.js November 2026 Security Release: How We Tracked and Patched It (DEV Community)](https://dev.to/devopsdaily/nodejs-november-2026-security-release-how-we-tracked-and-patched-it-of)
+- [Node.js: Wednesday, November 11, 2026 Security Releases (InfraStack)](https://infrastack.ai/live/VND-nodejs-november-2026-security-releases)
+- [CVE-2026-123872: node Improper Authentication (OffSeq Radar)](https://radar.offseq.com/threat/cve-2026-123872-improper-authentication-generic-in-nodejs-node-b66dc854200e1b87)
+- [Electron Releases](https://releases.electronjs.org/)
+- [Git fixes six vulnerabilities, including code execution during recursive clones (Help Net Security)](https://www.helpnetsecurity.com/2026/11/11/git-project-security-updates/)
+- [Git Patches Flaw That Lets Malicious Repositories Execute Code During Recursive Clones (The Hacker News)](https://thehackernews.com/2026/11/git-patches-flaw-that-lets-malicious.html)
+- [Google Issues Chrome Security Update for Eighth Actively Exploited Zero-Day of 2026 (The Hacker News)](https://thehackernews.com/2026/11/google-issues-chrome-security-update.html)
+- [Build with Modern Web Guidance (Chrome for Developers)](https://developer.chrome.com/docs/modern-web-guidance)
+- [Google Releases Modern Web Guidance 1.0 For AI Coding Agents (Search Engine Journal)](https://www.searchenginejournal.com/google-releases-modern-web-guidance-1-0-for-ai-coding-agents/596495/)
+- [How to use Chrome's Modern Web Guidance to prevent AI agents from writing legacy frontend code (LogRocket)](https://blog.logrocket.com/chromes-modern-web-guidance-prevent-ai-coding-agents/)
