@@ -1,0 +1,129 @@
+---
+title: '오늘의 IT 소식: Apache HTTP Server HTTP/2 원격 코드 실행, Rust 1.100, Gemini 4 Hydrogen과 Antigravity Orchestrator, Microsoft 365 대규모 장애'
+date: '2026-11-14'
+tags: ['IT-News', 'Security', 'Backend', 'Linux', 'Rust', 'Supply-Chain', 'AI', 'AI-Agent']
+draft: false
+summary: 'HTTP/2를 켠 Apache HTTP Server에서 인증 없이 원격 코드 실행이 가능한 CVE-2026-119618과 점검 방법, never 타입과 의존성 쿨다운을 들여온 Rust 1.100, 빠르고 저렴한 Gemini 4 Hydrogen과 모델을 자동으로 바꿔 쓰는 Antigravity Orchestrator, 그리고 하루 넘게 이어진 Microsoft 365 장애를 정리합니다.'
+---
+
+오늘은 서버를 운영한다면 바로 확인해야 할 Apache 취약점으로 시작합니다. 이어서 공급망 공격 대응 기능이 눈에 띄는 Rust 1.100 릴리스, Google의 새 경량 모델과 코딩 에이전트용 모델 자동 전환 기능, 마지막으로 Outlook과 Teams를 멈춰 세운 Microsoft 365 장애를 짧게 살펴봅니다.
+
+## 1. Apache HTTP Server mod_http2 원격 코드 실행 (CVE-2026-119618)
+
+**무엇인가요?**
+
+Apache HTTP Server의 HTTP/2 모듈(`mod_http2`)에서 경쟁 상태(race condition)로 힙 메모리가 망가지는 취약점이 공개됐습니다. HTTP/2 요청을 처리하는 작업 스레드와 연결 스레드가 같은 메모리 할당자를 함께 쓰면서 생기는 문제로, 인증 없이 원격에서 웹 서버 프로세스 권한으로 코드를 실행할 수 있습니다. Apache는 심각도를 Critical로 매겼고, 네덜란드 NCSC는 CVSS 9.8로 평가했습니다. Anthropic의 OSS Scanner와 Google Cloud 취약점 연구팀이 각각 따로 찾아 제보했습니다.
+
+**영향 범위**
+
+- Apache HTTP Server 2.4.55부터 2.4.70까지, HTTP/2가 켜져 있을 때 영향을 받습니다.
+- GitHub에서 따로 배포되는 `mod_h2` 2.0.8부터 2.0.42까지도 해당합니다.
+- 수정 버전은 11월 11일에 나온 2.4.71입니다. 2.4.71에 들어 있는 모듈도 버전 문자열은 2.0.42로 찍히므로, 버전 번호만 보지 말고 배포판 패키지에 패치가 반영됐는지 확인해야 합니다.
+- HTTP/1.1만 쓰는 서버는 영향이 없다고 안내됩니다.
+- Censys는 영향받는 버전을 드러내는 호스트를 약 150만 대로 집계했습니다. HTTP/2 활성화 여부까지 반영한 숫자는 아니라 실제 피해 대상은 이보다 적을 수 있습니다.
+- 11월 12일 기준 실제 악용 사례는 보고되지 않았습니다. 다만 공개 PoC가 있는지에 대해서는 보안 업체마다 설명이 엇갈리니, 악용이 쉬워질 수 있다고 보고 서두르는 편이 안전합니다.
+
+**개발자에게 왜 중요할까요?**
+
+Node.js나 Firebase 위주로 개발하더라도 앞단 리버스 프록시, 사내 도구 서버, 오래된 VPS, 도커 베이스 이미지 어딘가에 Apache가 숨어 있는 경우가 많습니다. HTTP/2는 TLS를 쓰는 사이트에서 기본처럼 켜 두는 설정이라 해당 조건을 만족하기 쉽습니다.
+
+**점검과 임시 조치**
+
+Debian/Ubuntu 기준으로는 아래처럼 버전과 HTTP/2 사용 여부를 확인할 수 있습니다. RHEL 계열은 `httpd -v`, `rpm -q httpd mod_http2`를 씁니다.
+
+```bash
+# 버전과 http2 모듈 로드 여부
+apache2 -v
+apache2ctl -M 2>/dev/null | grep -i http2
+grep -rn "^\s*Protocols" /etc/apache2/
+
+# 실제로 HTTP/2로 응답하는지 (2가 나오면 HTTP/2)
+curl -sk --http2 -o /dev/null -w "%{http_version}\n" https://localhost/
+```
+
+바로 업그레이드할 수 없다면 HTTP/2 경로를 막는 방법이 거론됩니다. 모듈을 끄거나(`a2dismod http2` 후 재시작), 각 가상 호스트에서 `Protocols http/1.1`로 지정하는 식입니다. 서버 전역 설정만 바꾸면 가상 호스트에 남은 `h2`, `h2c` 설정이 그대로 살아 있을 수 있으니, 적용 후 위 `curl` 명령으로 1.1이 나오는지 다시 확인하는 것이 좋습니다. Apache 공식 권고는 어디까지나 2.4.71로의 업그레이드입니다.
+
+## 2. Rust 1.100: never 타입 안정화와 Cargo 의존성 쿨다운
+
+**무엇인가요?**
+
+11월 12일 Rust 1.100.0이 나왔습니다. `rustup update stable`로 올릴 수 있습니다. 10년 동안 다섯 번 안정화에 실패했던 never 타입(`!`)이 드디어 안정화됐고, Cargo에는 공급망 공격을 겨냥한 기능이 들어왔습니다.
+
+**핵심 내용**
+
+- **never 타입**: 이전에는 함수 반환 타입(`-> !`)에만 쓸 수 있던 `!`를 `Result<T, !>`처럼 다른 위치에서도 쓸 수 있습니다. 기존 `Infallible`은 이제 `!`의 별칭입니다.
+- **Allocator API**: `std::alloc::Allocator` 트레이트가 안정화돼 `Vec::new_in`, `Box::new_in` 등으로 컬렉션마다 할당자를 고를 수 있습니다. 지금은 `Vec`과 `Box`만 지원합니다.
+- **DropGuard**: 스코프를 벗어날 때 클로저를 실행해 주는 `std::mem::DropGuard`가 추가됐습니다. 중간에 `?`로 빠져나가면 작업을 되돌리고, 성공하면 `DropGuard::dismiss`로 되돌리기를 취소하는 패턴에 쓸 수 있습니다.
+- **사용하지 않는 의존성 경고**: Cargo가 `cargo::unused_dependencies` 린트로 쓰지 않는 의존성을 기본 경고합니다. 해당 의존성을 쓸 수 있는 모든 빌드 대상을 빌드할 때만 나타나고, `dev-dependencies`는 검사하지 않습니다. 수준은 `Cargo.toml`의 `[lints.cargo]`에서 조정합니다.
+- **의존성 쿨다운**: 막 배포된 버전을 일정 기간 새로 고르지 않게 하는 설정이 생겼습니다.
+- **빌드 디렉터리 구조 변경**: 빌드 산출물을 파일 종류가 아니라 빌드 단계별로 정리하고, 설정 해시를 디렉터리 이름으로 옮겨 git worktree 사이에서 `build-dir`을 공유할 때 생기던 캐시 충돌을 줄였습니다.
+- 그 밖에 `bool::toggle`, `str::trim_prefix`, `str::trim_suffix`, `Vec::from_fn`, `Box::map` 같은 API도 안정화됐습니다.
+
+의존성 쿨다운은 `.cargo/config.toml`에 아래처럼 설정합니다.
+
+```toml
+[registry]
+global-min-publish-age = "3 days"
+```
+
+정말 급한 보안 패치처럼 예외가 필요하면 환경 변수로 한 번만 허용할 수 있습니다.
+
+```bash
+CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update clap --precise 4.6.9
+```
+
+**개발자에게 왜 중요할까요?**
+
+이번 주에도 탈취된 계정으로 악성 릴리스를 올리는 공격이 이어졌습니다. 이런 악성 버전은 배포 후 짧은 시간 안에 발견돼 내려가는 경우가 많아, 새 버전을 며칠 늦게 받는 것만으로도 위험을 꽤 줄일 수 있습니다. JavaScript 프로젝트에서도 사용하는 패키지 매니저가 비슷한 설정을 지원하는지 확인해 같은 원칙을 적용해 볼 만합니다.
+
+**주의할 점**
+
+- 2015, 2018, 2021 에디션에서도 never 타입 폴백이 `()`에서 `!`로 바뀝니다. 드물지만 제네릭 반환값을 무시하는 코드 등에서 타입 추론이 달라지거나 도달할 수 없는 코드 경고가 늘 수 있습니다.
+- 빌드 디렉터리 구조에 의존하던 스크립트나 테스트는 깨질 수 있습니다. 산출물 경로가 필요하면 Cargo의 JSON 메시지를 읽는 쪽이 안전합니다.
+- 쿨다운은 `pubtime` 정보가 없는 버전에는 적용되지 않고, `cargo install`에는 적용되지 않습니다. Rust 팀도 쿨다운 하나로 완전한 방어가 되지는 않는다고 밝혔습니다.
+
+## 3. Gemini 4 Hydrogen과 Antigravity Orchestrator
+
+**무엇인가요?**
+
+Google이 11월 12일 Gemini 4 시리즈의 빠르고 저렴한 모델인 Gemini 4 Hydrogen을 공개했습니다. 가장 강한 Carbon, 그 아래 Argon에 이어 일상적인 코딩과 에이전트 작업을 맡는 모델입니다. 동시에 코딩 에이전트 도구 Google Antigravity에는 한 작업 안에서 모델을 바꿔 쓰는 Orchestrator가 추가됐습니다.
+
+**핵심 내용**
+
+- 가격은 입력 100만 토큰당 1.50달러, 출력 100만 토큰당 7.50달러이며 100만 토큰 컨텍스트 전체에서 같은 요금입니다.
+- 입력은 최대 100만 토큰, 출력도 최대 100만 토큰까지 지원합니다.
+- 추론 수준은 low, medium, high(기본), 새로 생긴 xhigh 네 단계입니다.
+- Google 발표 기준 Terminal-Bench 4.1에서 57%로 Gemini 3.8 Flash(18.2%)를 크게 앞섰고, Artificial Analysis Intelligence Index에서는 51점(xhigh 54점)으로 Argon(50점)보다 높았습니다. 3.8 Flash보다 작업 완료가 2.5배 빠르다고 합니다.
+- Gemini API와 AI Studio, Android Studio에서 쓸 수 있고, 순차적으로 전 세계에 배포됩니다.
+
+**Orchestrator는 어떻게 동작하나요?**
+
+Antigravity 모델 선택 메뉴에서 Orchestrator를 고르면, 강한 모델이 코드베이스를 살펴 계획을 세우고 Hydrogen이 실제 수정과 테스트를 맡습니다. Hydrogen이 막히면 다시 강한 모델이 넘겨받습니다. Google은 Terminal-Bench 4.1에서 Carbon 단독에 가까운 성공률을 내면서 할당량은 평균 24% 덜 쓰고 19% 빨리 끝냈다고 밝혔습니다. Google AI Ultra 구독자는 Carbon 조합과 Argon 조합을, 유료 AI Pro 구독자는 Argon 조합을 쓸 수 있습니다.
+
+**개발자에게 왜 중요할까요?**
+
+계획은 비싼 모델에게, 반복적인 수정과 테스트는 싼 모델에게 맡기는 방식이 이제 도구 기본 기능으로 들어오고 있습니다. 직접 에이전트를 만든다면 단계별로 모델을 나눠 비용을 줄이는 설계를 고려해 볼 시점입니다. 다만 벤치마크 수치는 모두 Google 자체 발표이고, 커뮤니티에서는 서브 에이전트 모델을 직접 고르는 쪽이 낫다는 의견도 있었으니 내 작업에서 직접 비교해 보는 것이 좋습니다.
+
+## 4. Microsoft 365, 하루 넘게 이어진 대규모 장애
+
+미국 동부 기준 11월 12일 오후(한국 시간 13일 새벽)부터 Outlook, Teams, Copilot이 전 세계적으로 멈췄고, 13일 오후에야 Microsoft가 광범위한 복구를 알렸습니다. 영국 NHS를 비롯해 여러 나라의 공공기관과 기업이 영향을 받았습니다. Microsoft는 사이버 공격 흔적은 없다고 밝혔고, 원인으로 몇 달 전 네트워크 용량 증설 과정에서 들어간 문제가 최근 네트워크 변경을 계기로 드러났다고 설명했습니다.
+
+개발자 입장에서 배울 점은 두 가지입니다. 하나는 이번 장애처럼 오래전 변경이 한참 뒤 다른 변경과 맞물려 터질 수 있다는 점이고, 다른 하나는 메일이나 메신저 같은 외부 SaaS에 알림과 인증 흐름을 전부 기대는 서비스라면 대체 경로를 마련해 둬야 한다는 점입니다. 이메일 인증 링크나 장애 알림이 Microsoft 365 하나에만 의존하고 있지 않은지 점검해 볼 만합니다.
+
+## 마무리
+
+오늘 소식을 관통하는 키워드는 하나의 지점에 모든 것을 걸지 않는 것입니다. 기본으로 켜 둔 HTTP/2 하나가 서버 전체를 위험하게 만들고, 막 올라온 패키지 하나가 공급망을 무너뜨리고, 하나의 SaaS 장애가 업무를 멈춥니다. 패치는 빠르게, 새 의존성은 조금 늦게, 핵심 경로에는 대안을 두는 습관이 필요합니다.
+
+## 참고 자료
+
+- [Nov 12 Advisory: Apache HTTP Server mod_http2 Race Condition RCE (Censys)](https://censys.com/advisory/cve-2026-119618/)
+- [CVE-2026-119618 (Red Hat Customer Portal)](https://access.redhat.com/security/cve/cve-2026-119618)
+- [Apache CVE-2026-119618: Check and Patch mod_http2 (ComputingForGeeks)](https://computingforgeeks.com/apache-cve-2026-119618/)
+- [GeekNews: Apache HTTP Server의 치명적인 원격 코드 실행 취약점](https://news.hada.io/topic?id=37046)
+- [Announcing Rust 1.100.0 (Rust Blog)](https://blog.rust-lang.org/2026/11/12/Rust-1.100.0/)
+- [GeekNews: Rust 1.100.0](https://news.hada.io/topic?id=37070)
+- [Introducing Gemini 4 Hydrogen (Google)](https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-hydrogen/)
+- [Gemini 4 Hydrogen: everyday coding and agentic workflows for developers (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/build-with-gemini-4-hydrogen/)
+- [Gemini 4 Hydrogen and Orchestrator (Google Antigravity)](https://antigravity.google/blog/gemini-4-hydrogen-in-google-antigravity/)
+- [GeekNews: Gemini 4 Hydrogen](https://news.hada.io/topic?id=37068)
+- [A Massive Microsoft 365 Outage Is Entering Its Second Day Worldwide (iDrop News)](https://www.idropnews.com/news/massive-microsoft-365-outage-enters-second-day-worldwide/271088)
