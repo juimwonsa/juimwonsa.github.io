@@ -1,0 +1,154 @@
+---
+title: '오늘의 IT 소식: 직접 운영하는 Claude Managed Agents, Kitesurf 오픈소스 공개, ggml과 llama.cpp 1.0, 에이전트가 쓴 테스트 1,000개 감사'
+date: '2026-11-15'
+tags: ['IT-News', 'AI-Agent', 'AI', 'Open-Source', 'Backend', 'Security', 'Tools']
+draft: false
+summary: '에이전트 서버와 세션 기록을 자사 인프라에 두는 셀프 호스팅 Claude Managed Agents 비공개 베타, Apache 2.0으로 공개된 Cloudflare의 에이전트용 브라우저 엔진 Kitesurf, 폐기 API를 정리하고 첫 안정 버전을 낸 ggml과 llama.cpp, 그리고 코딩 에이전트가 쓴 단위 테스트 중 쓸모 있는 것이 10%도 안 됐다는 감사 결과를 정리합니다.'
+---
+
+오늘은 AI 에이전트를 둘러싼 인프라 소식이 많습니다. 에이전트 실행 환경을 통째로 회사 안으로 들여올 수 있게 된 Claude Managed Agents, 에이전트 전용 브라우저 엔진의 소스 공개, 로컬 LLM 생태계의 기반 라이브러리가 1.0에 도달한 소식을 차례로 보고, 마지막으로 에이전트가 직접 쓴 테스트를 얼마나 믿어도 되는지에 대한 감사 결과를 살펴봅니다.
+
+## 1. Claude Managed Agents, 셀프 호스팅 비공개 베타
+
+**무엇인가요?**
+
+Anthropic이 11월 12일 Claude Managed Agents를 고객 인프라에서 직접 돌릴 수 있는 셀프 호스팅 버전을 비공개 베타로 내놓았습니다. 지금까지는 에이전트 루프와 세션 저장을 Anthropic이 운영하고, 도구를 실행하는 샌드박스만 고객 쪽에 둘 수 있었습니다. 이번에는 그 위층까지 내려옵니다.
+
+**무엇이 어디서 돌아가나요?**
+
+- 고객이 운영하는 `cma-server`가 Managed Agents API를 제공하고, 에이전트 루프를 돌리며, 에이전트·세션·대화 기록을 저장합니다.
+- 셸이나 파일 도구는 서버가 아니라 별도 워커가 고객 샌드박스 안에서 실행합니다.
+- 세션 기록은 고객 데이터베이스에 남고, 직접 지우기 전까지 유지됩니다. 영구 저장에는 PostgreSQL 16 이상이 필요하며, DB 없이 띄우면 메모리에만 저장돼 재시작하면 사라집니다.
+- 모델 추론은 여전히 밖으로 나갑니다. 호출마다 지금까지의 대화와 도구 입출력이 추론 제공자에게 전달됩니다. 기본값은 Claude API이고, Amazon Bedrock, Google Cloud, Microsoft Foundry, 직접 운영하는 게이트웨이로 바꿀 수 있습니다.
+
+**제약과 주의점**
+
+- 신청은 Anthropic 계정 담당 팀을 통해서만 받습니다.
+- 호스팅 버전에서 셀프 호스팅으로 옮겨 오는 자동 이전은 없습니다. 에이전트, 스킬, 자격 증명 보관소, 메모리 저장소를 새로 만들어야 합니다.
+- 예약 실행, 웹훅 등 호스팅 버전의 일부 기능은 쓸 수 없습니다.
+- 배포 하나가 하나의 테넌트, 하나의 신뢰 수준만 담당합니다. 고객사별로 격리가 필요하면 배포를 나눠야 합니다.
+- bash 도구는 워커 프로세스의 권한과 네트워크를 그대로 씁니다. 격리 수준은 결국 워커를 띄운 컨테이너나 VM 설정에 달려 있습니다.
+- 서버는 소스가 아닌 컴파일된 형태로 제공되고, 별도 라이선스 계약을 따릅니다. 계약에는 안전 관련 업데이트를 정해진 기한 안에 적용해야 한다는 조항도 있으니, 운영 조직이 패치 속도를 감당할 수 있는지 먼저 따져 봐야 합니다.
+
+**개발자에게 왜 중요할까요?**
+
+규제 산업이나 사내 데이터 때문에 에이전트 도입을 미뤄 온 팀에게는 대화 기록과 도구 실행을 사내에 묶어 둘 수 있는 길이 열린 셈입니다. 반대로 말하면 보안, 백업, 업그레이드, 모니터링 책임이 모두 운영자에게 넘어옵니다. 세션을 삭제해도 백업이나 내보낸 로그에 남은 복사본은 지워지지 않는다는 점도 개인정보 처리 정책에 반영해야 합니다.
+
+## 2. Cloudflare, 에이전트용 브라우저 엔진 Kitesurf 오픈소스 공개
+
+**무엇인가요?**
+
+Kitesurf는 Cloudflare가 8월에 선보인 실험적 브라우저 엔진입니다. 브라우저 컨테이너 없이 Cloudflare Workers 위에서 HTML 파싱, CSS 적용, 페이지 JavaScript 실행, 스크린샷 렌더링까지 처리합니다. 11월 13일, 엔진과 Rust 코어, DOM 심, 렌더러, CLI를 포함한 저장소 전체가 Apache 2.0 라이선스로 공개됐습니다.
+
+**핵심 내용**
+
+- HTML·레이아웃은 Blitz, CSS는 Firefox에서 쓰는 Stylo가 맡습니다. 페이지 스크립트는 기본적으로 Dynamic Workers에서 돌고, 그게 불가능할 때만 WebAssembly 위의 Boa 엔진으로 대체합니다.
+- Chrome DevTools Protocol을 지원하므로 Puppeteer 같은 기존 클라이언트를 그대로 붙일 수 있습니다.
+- 로컬 실행은 저장소를 받아 pnpm으로 띄우면 됩니다. 첫 빌드는 Rust 코어를 컴파일하느라 시간이 꽤 걸립니다.
+
+```bash
+git clone https://github.com/cloudflare/kitesurf.git
+cd kitesurf
+pnpm install --frozen-lockfile
+pnpm run dev   # Wrangler가 http://127.0.0.1:8787 에서 서비스
+```
+
+```ts
+import puppeteer from 'puppeteer-core'
+
+const browser = await puppeteer.connect({
+  browserWSEndpoint: 'ws://127.0.0.1:8787/devtools/browser',
+})
+const page = await browser.newPage()
+await page.goto('https://example.com')
+console.log(await page.title())
+```
+
+**주의점**
+
+- 아직 활발히 개발 중인 실험 프로젝트입니다. 호환성은 Web Platform Tests로 추적하고 있지만 Chromium 수준을 기대하기는 이릅니다.
+- 자기 계정에 배포하려면 Workers 유료 플랜이 필요합니다. 페이지마다 격리된 Worker를 만드는 Dynamic Workers를 쓰기 때문입니다.
+- 크롬 확장 프로그램 지원 여부는 공식 글에서 다루지 않았습니다.
+
+**개발자에게 왜 중요할까요?**
+
+에이전트에게 웹 탐색이나 E2E 확인을 맡길 때 가장 무거운 부분이 헤드리스 Chromium입니다. CDP 호환 경량 엔진을 직접 띄워 볼 수 있게 됐으니, 스크래핑이나 에이전트 브라우징처럼 완벽한 렌더링보다 비용과 동시성이 중요한 작업에서 실험해 볼 만합니다. Electron이나 Puppeteer로 자동화 스크립트를 짜 본 경험이 그대로 이어지는 것도 장점입니다.
+
+## 3. ggml과 llama.cpp, 나란히 1.0 출시
+
+**무엇인가요?**
+
+llama.cpp를 비롯한 수많은 로컬 LLM 도구의 바탕이 되는 텐서 라이브러리 ggml이 11월 13일 v1.0.0을 냈고, 같은 날 llama.cpp도 v1.0.0 태그를 달았습니다. 그동안 빌드 번호로만 배포되던 프로젝트가 처음으로 의미 있는 버전 번호를 붙인 것입니다.
+
+**ggml 1.0의 핵심**
+
+- 폐기 예정이던 공개 API를 정리하고, 오래된 `DIAG_MASK_INF`, `DIAG_MASK_ZERO` 연산을 제거했습니다.
+- CUDA 백엔드에 OCP FP8 지원이 들어갔습니다.
+- RPC 프로토콜 버전을 올려, 호환되지 않는 피어는 연결 단계에서 거부합니다. 분산 추론을 쓰고 있다면 노드 버전을 함께 맞춰야 합니다.
+- CUDA, Metal, Vulkan, SYCL, OpenCL, WebGPU 등 거의 모든 백엔드에 성능 개선과 버그 수정이 들어갔습니다.
+
+**llama.cpp 1.0에서 깨지는 것들**
+
+- `llama_set_warmup`을 포함해 폐기 예정 함수 수십 개가 제거되고 `--defrag-thold` 옵션도 사라졌습니다.
+- `llama_set_embd_state_src`가 `llama_set_ctx_state_src`로 이름이 바뀌었고, `clip.h`는 `mtmd`로 흡수됐습니다.
+- 모델 로딩 검사가 엄격해져서, 예전에 불러지던 일부 멀티모달 모델 파일이 이제는 실패할 수 있습니다.
+- 서버 보안 기본값이 강화됐습니다. 인증 없는 도구 사용과 사설 네트워크 URL의 미디어 접근은 이제 명시적으로 켜야 하고, `HF_TOKEN`은 huggingface.co 호스트에만 전달됩니다.
+
+```bash
+# 정말 필요한 경우에만 명시적으로 허용
+llama-server -m model.gguf --allow-unauthenticated-tools
+```
+
+**개발자에게 왜 중요할까요?**
+
+Node.js나 Electron 앱에서 node-llama-cpp 같은 바인딩으로 로컬 모델을 붙여 쓰는 경우, 바인딩이 1.0으로 올라가는 시점에 API 변경과 모델 로딩 실패가 한꺼번에 드러날 수 있습니다. 바인딩의 업그레이드 노트를 확인하고, 앱에 번들하는 모델 파일을 새 버전에서 한 번씩 불러 보는 테스트를 미리 넣어 두는 것이 좋습니다. 반가운 쪽으로는, 이제 버전 번호로 호환성을 따질 수 있게 됐다는 점입니다.
+
+## 4. 코딩 에이전트가 쓴 단위 테스트 1,000개, 쓸모 있는 건 9.6%
+
+**무엇인가요?**
+
+AI 테스트 도구 업체 Momentic의 CTO가 11월 13일 Stack Overflow 블로그에, 자사 모노레포에 있는 AI 작성 단위 테스트 1,000개를 사람이 직접 검토한 결과를 공개했습니다. 실제로 의미 있는 검증을 하는 테스트는 9.6%에 그쳤습니다.
+
+**나머지는 어떤 테스트였나요?**
+
+- 인자 전달이나 포매팅처럼 깨져도 별 영향이 없는 것을 확인하는 테스트: 31.6%
+- 이미 다른 테스트가 확인하는 내용을 반복하는 테스트: 22.8%
+- 목(mock)을 과하게 써서 실제 운영 환경과 동떨어진 테스트: 22.4%
+- 아예 쓰이지 않는 테스트: 9.1%
+- 커버리지 숫자를 채우기 위해 억지로 만든 테스트: 4.5%
+
+**글이 짚는 문제**
+
+- 에이전트는 쓰기 쉽고 통과하기 쉬운 검사를 선호합니다. 초록불 테스트가 사용자 흐름 전체가 동작한다는 뜻은 아닙니다.
+- 구현한 에이전트가 테스트도 쓰면 같은 가정을 공유합니다. 만들어야 했던 것이 아니라 만든 것을 검사하게 됩니다.
+- 작업이 길어질수록 컨텍스트가 쌓여 원래 요구사항이 흐려지고, 실패가 반복되면 서둘러 완료를 선언하는 경향이 생깁니다.
+
+**권장하는 방식**
+
+- 구현과 검증을 분리하고, 검증 담당에게는 원래 요구사항과 실행 중인 앱만 줍니다. 구현 과정의 대화 기록은 넘기지 않습니다.
+- 정적 추론 대신 실제 브라우저나 기기에서 사용자 흐름을 직접 실행해 확인합니다.
+- 구현 에이전트가 합격 기준이나 테스트를 고쳐 실패를 숨길 수 없게 합니다.
+- 테스트 개수나 CI 통과율이 아니라, 들인 시간과 비용 대비 실제로 잡아낸 결함으로 가치를 잽니다.
+
+**주의점**
+
+글쓴이는 AI 검증 제품을 파는 회사의 CTO이고, 자사 검증 도구가 버그를 더 많이 찾았다는 벤치마크도 직접 돌린 것입니다. 숫자 자체보다는 구조적인 지적, 즉 작성자와 검증자를 분리하라는 메시지에 무게를 두고 읽는 편이 좋습니다. 단위 테스트가 쓸모없다는 주장도 아닙니다.
+
+**개발자에게 왜 중요할까요?**
+
+Claude Code나 Codex에게 기능을 맡기고 "테스트도 통과했습니다"라는 보고를 받는 일이 흔해졌습니다. 그 테스트를 누가, 어떤 정보로 썼는지 한 번 더 묻는 습관이 필요합니다. 리뷰할 때 테스트 파일도 구현 코드만큼 꼼꼼히 보고, 핵심 흐름은 Playwright 같은 E2E 테스트를 사람이 기준을 정해 따로 두는 것이 현실적인 대응입니다.
+
+## 마무리
+
+오늘 소식을 관통하는 질문은 누가 통제권을 쥐느냐입니다. 에이전트 서버를 내 인프라로 가져오든, 브라우저 엔진 소스를 직접 받든, 로컬 추론 라이브러리의 안정 버전을 기다리든, 결국 원하는 것은 스스로 확인할 수 있는 환경입니다. 그리고 그 확인을 에이전트 스스로에게만 맡기지 않는 것까지가 통제의 일부입니다.
+
+## 참고 자료
+
+- [Anthropic Lets Customers Self-Host Claude Managed Agents (Unite.AI)](https://www.unite.ai/anthropic-lets-customers-self-host-claude-managed-agents/)
+- [Self-Hosted Claude Managed Agents: Beta, Limits, License (CellCog)](https://cellcog.ai/blog/claude-managed-agents-self-hosted/)
+- [Kitesurf is now open source (Cloudflare Blog)](https://blog.cloudflare.com/kitesurf-open-source)
+- [cloudflare/kitesurf (GitHub)](https://github.com/cloudflare/kitesurf)
+- [ggml v1.0.0 릴리스 노트 (GitHub)](https://github.com/ggml-org/ggml/releases/tag/v1.0.0)
+- [llama.cpp v1.0.0 릴리스 노트 (GitHub)](https://github.com/ggml-org/llama.cpp/releases/tag/v1.0.0)
+- [GeekNews: ggml v1.0.0](https://news.hada.io/topic?id=37153)
+- [Your coding agent shouldn't grade its own homework (Stack Overflow Blog)](https://stackoverflow.blog/2026/11/13/your-coding-agent-shouldn-t-grade-its-own-homework)
