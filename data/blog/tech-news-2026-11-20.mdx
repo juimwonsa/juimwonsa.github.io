@@ -1,0 +1,131 @@
+---
+title: '오늘의 IT 소식: PHP 8.6 정식 출시와 지원 버전 전체 긴급 보안 패치, Gemini 4 Neon, Anthropic 나스닥 상장'
+date: '2026-11-20'
+tags: ['IT-News', 'Security', 'Backend', 'AI', 'AI-Agent']
+draft: false
+summary: '부분 함수 적용과 스트림 폴링 API를 들여온 PHP 8.6.0이 출시된 날, 지원 중인 모든 PHP 브랜치에 치명 등급을 포함한 18건의 보안 수정이 함께 나왔습니다. 여기에 중간급 가격으로 코딩 에이전트 지표 1위를 내세운 Google Gemini 4 Neon과, 역대 최대 규모로 기록된 Anthropic의 나스닥 상장 소식을 정리합니다.'
+---
+
+오늘은 PHP 소식이 두 가지 얼굴로 왔습니다. 1년을 기다린 새 버전이 나온 같은 날, 기존 버전 전체에 치명 등급 보안 패치가 함께 배포됐습니다. 이어서 Google의 새 중간급 모델 Gemini 4 Neon, 그리고 업계 전체에 의미가 큰 Anthropic의 상장 소식을 모았습니다.
+
+## 1. PHP 8.6.0 정식 출시: 부분 함수 적용, 폴링 API, clamp()
+
+**무엇인가요?**
+
+PHP 팀이 11월 19일 PHP 8.6.0을 공개했습니다. php.net 공지에 소개된 대표 기능은 부분 함수 적용(Partial Function Application), readonly 속성의 기본값, 스트림 감시용 `Io\Poll` API, `clamp()` 함수, `\Time\Duration` 클래스, `SortDirection` 열거형입니다.
+
+**핵심 내용**
+
+- **부분 함수 적용**: 함수 호출 인자 자리에 `?`를 두면 나머지 인자가 채워진 새 함수(클로저)가 만들어집니다. 8.5에서 들어온 파이프 연산자 `|>`와 함께 쓰면 진가가 드러납니다.
+- **readonly 속성 기본값**: 이제 `readonly` 속성 선언에서 바로 기본값을 줄 수 있습니다.
+- **`Io\Poll`**: epoll 등 OS의 폴링 기능으로 여러 스트림을 감시하는 저수준 API입니다. 이벤트 루프나 비동기 문법을 새로 넣은 것은 아니고, 그런 라이브러리가 기반으로 쓸 수 있는 부품에 가깝습니다.
+- **`clamp()`와 `Duration`**: 값을 최솟값과 최댓값 사이로 자르는 `clamp()`, 시간 길이를 단위 혼동 없이 다루는 `\Time\Duration`이 추가됐습니다. `sleep()`에 `Duration`을 넘기는 예시도 소개됐습니다.
+
+```php
+// 부분 함수 적용 + 파이프 연산자
+$slug = 'Hello World'
+    |> str_replace(' ', '-', ?)
+    |> strtolower(...);   // 'hello-world'
+
+// 범위 제한
+clamp(101, min: 0, max: 100); // 100
+
+// readonly 속성 기본값
+final class CreateBooksTable {
+    public readonly string $name = '2026-01-01_create_books_table';
+}
+```
+
+**주의할 점**
+
+세션 관련 기본값이 바뀐 부분은 꼭 확인해야 합니다. 정리 글에 따르면 `session.use_strict_mode`와 `session.cookie_httponly`가 기본으로 켜지고 `session.cookie_samesite` 기본값이 `Lax`가 됩니다. 보안에는 좋은 변화지만, 자바스크립트에서 세션 쿠키를 읽거나 다른 사이트에서 POST로 넘어오는 흐름에 세션 쿠키가 실려 오기를 기대하던 앱은 동작이 달라집니다. 이 밖에 `finally` 블록 안의 `return`, `spl_object_hash()`, `is_integer()` 같은 별칭 함수, `SplFileObject`의 CSV 메서드 등 정리 대상(deprecation)도 많으니 마이그레이션 가이드를 먼저 보는 편이 좋습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Node.js 위주로 개발하더라도 워드프레스, Laravel 기반 관리자 페이지처럼 PHP가 섞인 프로젝트를 만나는 일은 여전히 흔합니다. 파이프와 부분 적용이 갖춰지면서 PHP 코드도 함수형 스타일로 짧게 쓸 수 있게 됐고, 자바스크립트의 화살표 함수와 커링에 익숙한 분이라면 금방 손에 붙을 문법입니다.
+
+## 2. 같은 날 나온 PHP 긴급 보안 릴리스: 18건 수정, PHP-FPM 요청 밀반입은 CVSS 9.2
+
+**무엇인가요?**
+
+PHP 팀은 하루 전인 18일 "치명(CRITICAL) 등급이 포함된 보안 릴리스"를 예고했고, 19일 PHP 8.5.13, 8.4.28, 8.3.37, 8.2.36을 배포했습니다. BleepingComputer는 Aikido를 인용해 엔진 코어, 세션 처리, PHP-FPM, CGI 등에 걸친 CVE 18건이 고쳐졌다고 전했습니다. PHP 팀은 치명 등급 문제들이 기본값이 아니거나 흔치 않은 설정에서만 발생한다고 설명했습니다.
+
+**핵심 내용**
+
+- **CVE-2026-129289 (CVSS 9.2)**: PHP-FPM 요청 밀반입(request smuggling) 문제입니다. 웹 서버가 PHP-FPM과의 연결을 재사용하는 특정 nginx, Apache, HAProxy, LSAPI 구성에서 인증 없이 PHP 코드를 실행당할 수 있습니다. 백엔드 연결을 재사용하지 않는 일반적인 구성은 해당되지 않습니다.
+- **원격 코드 실행으로 이어질 수 있는 메모리 버그들**: 매직 메서드 백트레이스 관련 use-after-free(CVE-2026-129474), 시간대 캐시 use-after-free(CVE-2026-129496), 세션 파일 부분 덮어쓰기(CVE-2026-126714), 세션 직렬화 방식 불일치(CVE-2026-115560) 등이 포함됐습니다.
+- **기타**: PHP-FPM epoll use-after-free를 통한 로컬 권한 상승(CVE-2026-129291), PHAR의 OpenSSL 서명 검증을 알고리즘 다운그레이드로 우회하는 문제(CVE-2026-128090)도 고쳐졌습니다.
+- **실제 악용**: 공개된 자료 기준으로 실제 공격 사례는 보고되지 않았습니다.
+
+**당장 할 수 있는 일**
+
+업데이트가 최선이고, 바로 못 한다면 아래 완화책을 고려할 수 있습니다. 다만 Aikido는 이 설정들이 이번 수정 전체를 막아 주지는 않는다고 경고했습니다.
+
+```ini
+; php.ini 또는 FPM 풀 설정 (ini_set이나 .user.ini가 아니라 서버 설정에서)
+; 세션 업로드 진행 기능 끄기: CVE-2026-115560 등 세션 계열 완화
+session.upload_progress.enabled = 0
+```
+
+```nginx
+# CVE-2026-129289 임시 완화: PHP-FPM으로의 연결 재사용을 끄기
+# (fastcgi_keep_conn on; 을 쓰고 있다면 제거하거나 off로)
+fastcgi_keep_conn off;
+```
+
+설정을 바꾼 뒤에는 모든 PHP 워커를 재시작해야 적용됩니다. 그리고 PHP-FPM이나 LSAPI 포트가 신뢰할 수 없는 네트워크에 직접 열려 있지 않은지도 점검해야 합니다.
+
+**개발자에게 왜 중요한가요?**
+
+10월의 PHP2Shell에 이어 한 달 만에 다시 원격 코드 실행급 수정이 나왔습니다. 10월 패치(8.5.12 등)를 했더라도 이번 버전으로 한 번 더 올려야 합니다. 또 하나 기억할 점은 PHP 8.2의 공식 지원이 12월 31일에 끝난다는 것입니다. 컨테이너 이미지의 PHP 버전은 호스트를 업데이트해도 그대로이니, Dockerfile의 베이스 이미지 태그도 함께 확인해야 합니다.
+
+## 3. Google Gemini 4 Neon: 중간 가격대에서 코딩 에이전트 지표 1위를 내세운 모델
+
+**무엇인가요?**
+
+Google이 Gemini 4 제품군의 새 모델 Gemini 4 Neon을 공개했습니다. 가장 강력한 Carbon과 빠른 일상 작업용 Hydrogen 사이에서, 깊이와 효율의 균형을 맞춘 모델로 소개됩니다. 소프트웨어 개발, 지식 업무, 과학 워크플로를 끝까지 빠르게 처리하는 데 초점을 맞췄습니다.
+
+**핵심 내용**
+
+- **컨텍스트**: 100만 토큰
+- **가격(100만 토큰당)**: 입력 3달러, 캐시된 입력 0.15달러, 출력 15달러
+- **Google이 밝힌 성능**: Artificial Analysis Coding Agent Index 1위(58.6), Terminal-Bench 4.1 65.2%. 같은 high 설정에서 Carbon보다 작업당 비용이 32% 낮다고 밝혔습니다.
+- **제공 범위**: Google AI Studio의 Gemini API(유료 등급), Antigravity와 Android Studio(Google AI Pro·Ultra 구독자), Gemini 앱(Pro·Ultra), 기업용 Gemini에서 쓸 수 있습니다.
+
+**주의할 점**
+
+벤치마크 수치는 모두 Google이 발표한 값입니다. 특히 SWE-sweep 점수가 범용 하네스(mini-SWE)에서는 12.8%, Google의 Antigravity에서는 39.0%로 크게 차이 납니다. 모델 자체보다 에이전트 하네스가 결과를 좌우한다는 뜻이므로, 내가 쓰는 도구(Claude Code, Codex CLI, Cursor 등)에서 직접 돌려 보기 전에는 수치를 그대로 믿지 않는 편이 좋습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Firebase AI Logic이나 Gemini API로 기능을 만드는 입장에서는 Carbon보다 싸고 Hydrogen보다 똑똑한 선택지가 생긴 셈입니다. 캐시 입력이 95% 할인되므로 긴 시스템 프롬프트나 문서를 반복해서 넣는 에이전트형 기능이라면 비용 계산이 크게 달라질 수 있습니다.
+
+## 4. Anthropic, 나스닥 상장: 공모가 83달러, 역대 최대 IPO
+
+**무엇인가요?**
+
+Claude를 만드는 Anthropic이 공모가를 주당 83달러로 확정하고 11월 19일 나스닥에서 거래를 시작했습니다. 10월 말 S-1 서류를 공개 제출한 지 약 3주 만입니다. CBS News에 따르면 프런티어 AI 연구소가 상장한 첫 사례입니다.
+
+**핵심 내용**
+
+- **공모가**: 당초 희망 범위(70달러에서 78달러)를 넘어선 83달러로, 클래스 A 보통주 9억 8천만 주를 팔았습니다.
+- **조달 규모**: 공모로 약 813억 달러를 모았고, 6월 SpaceX 상장(750억 달러)을 넘어 역대 최대 IPO가 됐습니다. AMD, Broadcom, Google, Microsoft, Nvidia 등의 별도 투자 약 260억 달러를 합치면 총 1,070억 달러 안팎입니다.
+- **기업 가치**: 약 1조 5천억 달러로 평가됐습니다.
+
+**개발자에게 왜 중요한가요?**
+
+당장 API 사용법이 바뀌는 소식은 아닙니다. 다만 상장사가 되면 분기마다 실적과 위험 요인을 공개해야 하므로, 가격 정책, 모델 지원 종료 일정, 인프라 투자 계획 같은 정보가 이전보다 투명하게 드러날 가능성이 큽니다. Claude 기반 에이전트를 제품에 깊이 넣은 팀이라면 공급사의 방향을 읽을 수 있는 자료가 하나 더 생긴 셈입니다.
+
+## 마무리
+
+오늘 소식을 관통하는 한 줄은 "새 기능과 함께 기본값을 다시 보라"입니다. PHP 8.6은 세션 쿠키 기본값을 바꿨고, 보안 릴리스는 연결 재사용 같은 평범한 설정이 위험이 될 수 있음을 보여 줬으며, Gemini 4 Neon은 같은 모델도 하네스에 따라 결과가 세 배 차이 날 수 있음을 드러냈습니다. 업그레이드 버튼을 누르기 전에, 내 환경의 기본 설정부터 확인하는 습관이 필요합니다.
+
+## 참고 자료
+
+- [PHP: News Archive - 2026 (PHP 8.6.0 및 보안 릴리스 공지)](https://www.php.net/archive/2026.php)
+- [What's new in PHP 8.6 - stitcher.io](https://stitcher.io/blog/new-in-php-86)
+- [PHP security updates fix 18 flaws, including critical RCE bugs - BleepingComputer](https://www.bleepingcomputer.com/news/security/php-security-updates-fix-18-flaws-including-critical-rce-bugs/)
+- [PHP critical security release, 19 November (CVE-2026-115560) - Aikido](https://www.aikido.dev/blog/php-security-release-19-november-2026-cve-2026-115560)
+- [Introducing Gemini 4 Neon - Google](https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-neon/)
+- [Anthropic IPO Nasdaq debut - CBS News](https://www.cbsnews.com/news/anthropic-ipo-nasdaq-debut-claude-ai/)
+- [Anthropic prices IPO at $83 a share, above projected range - TechCrunch](https://techcrunch.com/2026/11/18/anthropic-reportedly-prices-ipo-at-83-a-share-above-projected-range/)
