@@ -1,0 +1,114 @@
+---
+title: '오늘의 IT 소식: Vite 개발 서버 원격 코드 실행, 200만 개 카나리로 드러난 AI 라우터 유출, Valkey 9.2, OpenAI Performance Factory'
+date: '2026-11-22'
+tags: ['IT-News', 'Security', 'Frontend', 'Supply-Chain', 'AI-Agent', 'Database', 'Backend']
+draft: false
+summary: '--host로 열어 둔 Vite 개발 서버에서 원격 코드 실행이 가능한 취약점이 패치됐고, HD Moore 팀은 200만 건의 프롬프트에 심은 카나리로 AI 라우터와 리셀러를 거친 데이터가 새는 경로를 추적했습니다. B+ 트리 정렬 집합과 forkless 스냅숏을 담은 Valkey 9.2, Codex 에이전트로 성능 회귀를 조사하는 OpenAI의 내부 시스템도 정리합니다.'
+---
+
+이번 주말 소식은 개발 환경과 AI 파이프라인의 보이지 않는 경계를 다시 보게 만드는 내용이 많습니다. 프런트엔드 개발자라면 매일 띄우는 Vite 개발 서버의 치명적 취약점, AI API를 중간 업체를 통해 쓰는 팀이라면 꼭 알아야 할 대규모 유출 연구, 그리고 Redis 대안으로 자리 잡은 Valkey의 새 버전과 OpenAI가 공개한 에이전트 운영 사례를 차례로 살펴봅니다.
+
+## 1. Vite 개발 서버 원격 코드 실행(GHSA-p4f5-76q4-ffq7)
+
+**무엇인가요?**
+
+Vite 메인테이너가 11월 9~10일께 공개한 보안 권고 GHSA-p4f5-76q4-ffq7이 이번 주 Vite 공식 채널 공지와 보안 업체 분석을 계기로 다시 주목받고 있습니다. 개발 서버가 내부적으로 쓰는 가상 모듈 `/@id/__vite-browser-external:` 뒤에 붙는 이름이 이스케이프되지 않은 채 생성 코드에 들어가는 문제입니다. Vite가 매긴 심각도는 CVSS 4.0 기준 9.1(Critical)이며, 작성 시점 기준으로 CVE 번호는 아직 없습니다.
+
+**핵심 내용**
+
+- **공격 결과**: 공격자가 요청 URL로 자바스크립트를 주입해 `server.fs` 허용 목록 밖의 파일을 읽고, 개발 서버가 도는 머신에서 코드를 실행할 수 있습니다. 인증이나 사용자 동작은 필요 없고, 권고문에 PoC가 포함돼 있습니다.
+- **해당 조건**: 개발 서버가 네트워크에 열려 있을 때만 해당합니다. `--host` 옵션이나 `server.host`를 `true`, `0.0.0.0` 등으로 설정한 경우입니다. 기본값인 localhost 전용 서버, `vite preview`, 빌드 결과물은 영향이 없습니다.
+- **수정 버전**: 8.3.7, 8.1.7, 7.3.8, 6.4.6, 그리고 Vite+ 1.5.1입니다. 8.2 계열은 권고문에 8.2.5로 적혀 있지만 한 분석에 따르면 이 버전은 npm에 올라가지 않았으니 8.2.6을 쓰는 편이 안전합니다. 6.4 미만(4.x, 5.x)은 별도 패치가 없어 6.4.6 이상으로 메이저 업그레이드해야 합니다.
+- **Vite 8의 특이점**: 수정 일부가 번들러 Rolldown에 들어 있어 Vite만 올리고 lockfile의 Rolldown이 예전 버전으로 남으면 안 됩니다.
+- **우회책 없음**: 권고문은 별도 우회 설정을 제시하지 않습니다. 분석 글들은 `allowedHosts`나 `server.fs` 설정으로는 막히지 않는다고 설명합니다.
+
+**당장 할 수 있는 일**
+
+```bash
+npm ls vite vite-plus      # 전이 의존성까지 실제 해석된 버전 확인
+npm install vite@latest    # 또는 사용 중인 메이저 라인의 수정 버전
+```
+
+업그레이드 전까지는 `--host`를 빼서 localhost로만 띄우는 것이 유일한 완화책입니다. SSH 포트 포워딩, 리버스 프록시, Docker의 포트 매핑(`-p 5173:5173`)으로도 localhost 서버가 외부에 노출될 수 있다는 점을 함께 확인하세요. 의심 정황이 있다면 개발 서버 로그에서 `/@id/__vite-browser-external:`와 `/@fs/` 요청을 찾아보고, 그 머신의 `.env`, SSH 키, 클라우드 자격 증명을 교체하는 것이 권장됩니다.
+
+**개발자에게 왜 중요한가요?**
+
+모바일 실기기 테스트나 같은 와이파이의 동료에게 화면을 보여 주려고 `vite --host`를 쓰는 일은 흔합니다. 카페나 공용 네트워크에서 그렇게 띄워 두면 같은 네트워크의 누구든 내 노트북에서 코드를 실행할 수 있다는 뜻입니다. Electron 앱의 렌더러를 Vite로 개발하는 경우(electron-vite 등)도 Vite 버전을 확인해 두세요. 또 `npm audit`이 아직 이 권고를 잡지 못한다는 보고가 있으니 버전을 직접 확인하는 편이 확실합니다.
+
+## 2. 200만 개의 카나리로 추적한 AI 공급망 유출
+
+**무엇인가요?**
+
+Dragos의 최고 연구 책임자 HD Moore가 11월 19일 AI 프롬프트가 어디까지 흘러가는지 추적한 연구를 공개했습니다. 7월부터 11월까지 다섯 달 동안 약 200만 건의 프롬프트에 프롬프트마다 고유한 URL, 자격 증명, AWS 키 같은 미끼(카나리)를 심어 보내고, 누가 그것을 언제 열어 보는지 관찰했습니다. 라우팅 경로도 약 2,000개를 추적했습니다.
+
+**핵심 내용**
+
+- **세 곳의 호스팅 업체 침해**: 최소 세 AI 호스팅 업체에서 요청 데이터가 탈취된 정황이 나왔고, 가장 이른 사례는 7월 중순이었습니다. 세 곳 모두 연구진이 알리기 전까지 몰랐다고 합니다.
+- **가장 큰 사건**: 10월 말 특정 업체에 한 번씩만 보낸 AWS 키 수백 개가 해당 시간대에 모두 도난당했습니다. 모델이 돌기도 전에 거부된 요청까지 털린 것으로 보아, 업체의 입구에서 요청을 통째로 복사한 것으로 분석됩니다. 공격자는 키 검증 뒤 S3, Secrets Manager, Parameter Store를 뒤지고 Bedrock 모델을 켜고 IAM 사용자를 만드는 순서로 움직였습니다.
+- **리셀러의 로그 보관**: 추론 마켓플레이스 리셀러는 해킹 없이 일반적인 요청 로깅만으로 고객 프롬프트를 열람하고 보관했습니다.
+- **지켜지지 않은 개인정보 설정**: 데이터 수집 거부나 Zero Data Retention으로 표시한 요청도 상당수가 다른 조직에 전달돼 링크가 열렸습니다. 한 요청에 심은 링크가 몇 주 뒤 메신저에 다시 등장한 사례도 있었습니다. 연구진의 요약은 개인정보 플래그는 첫 번째 홉에만 적용된다는 것입니다.
+- **AI 공격 도구 등장**: 두 업체를 동시에 침해한 공격자는 11월부터 LLM 기반 침투 테스트 도구 ARTEX를 쓰기 시작했고, 연구진은 `artex-agent`, `artex-judge-r121` 사용자 에이전트를 탐지 규칙에 넣으라고 권합니다.
+
+**당장 할 수 있는 일**
+
+연구진의 권고는 가능하면 1차 모델 제공사에 직접 연결하고, 리셀러 마켓플레이스는 피하며, 라우터를 쓴다면 개인정보 설정이 실제 라우팅을 바꾸는지 확인하라는 것입니다. 에이전트나 파이프라인 컨텍스트에 직접 만든 카나리 자격 증명을 넣어 두고, 그것이 쓰이면 사고로 다루라는 조언도 있습니다. 4월에 공개된 학계 연구에서도 유료·무료 LLM 라우터 중 일부가 응답에 악성 명령을 끼워 넣거나 AWS 카나리에 접근한 사례가 보고된 바 있습니다.
+
+**개발자에게 왜 중요한가요?**
+
+여러 모델을 한 API 키로 쓰게 해 주는 라우터나 저렴한 재판매 API는 개인 프로젝트와 스타트업에서 특히 인기가 많습니다. 그런데 코딩 에이전트는 작업 중 `.env`나 설정 파일 내용을 그대로 프롬프트에 실어 보내는 경우가 많습니다. 내 프롬프트가 거치는 모든 홉이 내 비밀을 볼 수 있다고 가정하고, 에이전트가 읽을 수 있는 범위에서 실제 자격 증명을 빼 두는 습관이 필요합니다.
+
+## 3. Valkey 9.2: B+ 트리 정렬 집합, forkless 스냅숏, 스트림 압축
+
+**무엇인가요?**
+
+Redis 포크인 Valkey의 9.2 첫 안정 버전이 11월 18일 GitHub에 올라왔고, Linux Foundation이 다음 날 공식 발표했습니다. 메모리 사용량과 복제 비용을 줄이는 변경이 중심이고, AI 추론용 분산 KV 캐시 연동도 함께 내세웠습니다.
+
+**핵심 내용**
+
+- **정렬 집합의 B+ 트리 전환**: 큰 정렬 집합의 내부 구조가 skiplist에서 B+ 트리로 바뀌었습니다. 발표에 따르면 수백만 개 항목 규모에서 메모리 효율이 36~43% 좋아지고 업데이트는 최대 105% 빨라집니다. `OBJECT ENCODING`이 `skiplist` 대신 `btree`를 반환하니, 이 값을 검사하는 모니터링 스크립트가 있다면 확인이 필요합니다.
+- **forkless 스냅숏**: RDB 저장을 프로세스 fork 대신 백그라운드 스레드로 처리하는 옵션입니다. fork 시점에 메모리가 크게 치솟는 문제를 줄이며, 기본값이 아니라 설정으로 켜야 합니다.
+- **복제·백업 압축**: 복제 트래픽 압축으로 전송량이 약 50~65% 줄고, LZ4 옵션으로 백업 파일이 최대 80% 작아진다고 합니다. RDB와 복제용 Zstd 스트리밍 코덱도 들어왔습니다.
+- **새 명령**: 조건부 삭제 `DELEX`(IFEQ/IFNE), 만료를 함께 거는 원자적 증가 `INCREX`, 핫 키 탐지 `HOTKEYS`, ACL 역할 기능, 최장 접두사 조회용 새 자료형 Path Hash 등이 추가됐습니다.
+- **AI 추론 캐시**: LMCache를 통해 vLLM, SGLang의 KV 캐시를 GPU 여러 대가 공유하는 구성을 지원한다고 발표했습니다. 추론 비용과 첫 토큰 지연 감소 수치는 모두 최대치 기준 주장입니다.
+
+**주의할 점**
+
+`ZRANGEBYSCORE`, `ZCOUNT` 등이 이제 빈 문자열이나 여는 괄호만 있는 점수 범위를 0으로 해석하지 않고 거부합니다. 예전 동작에 기대던 코드는 오류가 날 수 있습니다. 또 키 만료가 dirty 카운터를 올리도록 바뀌어 저장 지점과 `BGSAVE`가 전보다 자주 일어날 수 있습니다. 보안 관련으로는 `PFMERGE`의 ACL 우회, HyperLogLog 범위 밖 쓰기 등의 수정도 포함됐습니다.
+
+**개발자에게 왜 중요한가요?**
+
+리더보드, 랭킹, 타임라인처럼 정렬 집합을 많이 쓰는 Node.js 백엔드라면 같은 서버에서 메모리를 꽤 아낄 수 있습니다. 지난주 Redict 지원 종료 소식과 함께 보면 Valkey가 사실상 오픈소스 Redis 호환 서버의 기본 선택지가 돼 가고 있습니다. 다만 관리형 서비스(ElastiCache 등)에서 9.2를 고를 수 있는 시점은 서비스마다 다릅니다.
+
+## 4. OpenAI Performance Factory: Codex 에이전트가 성능 회귀를 조사하는 방법
+
+**무엇인가요?**
+
+OpenAI가 11월 19일 엔지니어링 블로그에 ChatGPT의 성능 회귀를 Codex 에이전트로 조사하는 내부 시스템 Performance Factory를 공개했습니다. 성능 알림이 울리면 작업이 생성되고, 에이전트가 원인을 찾고 수정 PR을 만든 뒤 배포 후 복구까지 확인하는 구조입니다.
+
+**핵심 내용**
+
+- **구성**: 작업과 상태를 저장하는 작업 서비스, 준비된 작업마다 Codex 턴을 실행하는 디스패치 루프, 사내망에서 저장소와 관측 도구(메트릭, 로그, 트레이스, CPU 프로파일)에 접근하는 클라우드 실행 환경, PR 리뷰 코멘트나 CI 실패 같은 이벤트로 작업을 다시 깨우는 구독 기능으로 이뤄집니다. 워크플로는 상태와 전이를 정의한 설정 파일과 상태별 마크다운 프롬프트로 정의합니다.
+- **적대적 리뷰**: 에이전트가 원인을 진단하면 맥락이 비어 있는 별도 Codex 세션이 증거를 검증하고 다른 설명을 시험합니다. 수정안도 같은 방식으로 검토합니다.
+- **사람의 역할**: PR 병합은 항상 엔지니어가 결정합니다. 캐시를 쓸지, 오래된 데이터를 허용할지 같은 설계상의 절충도 사람 몫입니다.
+- **수치**: 3개월 남짓한 기간에 1,700건 이상을 조사하고 600건 이상의 근본 원인을 찾았습니다. 수동 검토한 원인 제안 100건 중 70%가 정확했습니다. VentureBeat 보도에 따르면 에이전트가 작성한 PR이 그대로 배포된 경우는 15건 정도였습니다.
+- **한계**: OpenAI 스스로 수정의 품질이 진단보다 뒤처지며, 지나치게 복잡하거나 버그를 만드는 수정이 있다고 밝혔습니다. 사람 승인 없는 자동 배포는 아직 검토 단계입니다.
+
+**개발자에게 왜 중요한가요?**
+
+에이전트를 실제 운영에 붙이려는 팀에게 참고할 만한 설계가 많습니다. 작업 상태를 원시 로그가 아니라 발견 사항과 재실행 가능한 쿼리로 작게 유지하기, 에이전트를 바꾸기 전에 과거 사고로 백테스트하기, 결론을 다른 세션이 반박하게 하기 등은 규모가 작은 팀에서도 바로 흉내 낼 수 있습니다. 동시에 OpenAI 규모에서도 진단 정확도는 70% 수준이고 최종 판단은 사람이 한다는 점은 현실적인 기대치를 잡는 데 도움이 됩니다.
+
+## 마무리
+
+localhost에만 열린 줄 알았던 개발 서버, 첫 홉에서만 지켜지는 개인정보 설정처럼, 오늘의 소식은 경계가 내가 생각한 곳에 있지 않을 수 있다는 점을 보여 줍니다. 도구를 새로 들이는 것만큼 내 코드와 데이터가 실제로 어디까지 닿는지 확인하는 일이 중요합니다.
+
+## 참고 자료
+
+- [Atlas: Vite의 11월 개발 서버 RCE 분석](https://atlasum.net/blog/vite-dev-server-virtual-module-rce)
+- [AI Heartland: Vite dev server RCE](https://ai-heartland.com/security/vite-dev-server-rce/)
+- [Vite 보안 권고 GHSA-p4f5-76q4-ffq7](https://github.com/vitejs/vite/security/advisories/GHSA-p4f5-76q4-ffq7)
+- [Dragos: Three breaches, endless leaks: Your AI supply chain needs canaries](https://www.dragos.com/blog/ai-supply-chain-security-canary-tokens)
+- [Risky Bulletin: Malicious LLM proxy routers found in the wild](https://news.risky.biz/risky-bulletin-malicious-llm-proxy-routers-found-in-the-wild/)
+- [Linux Foundation: Valkey 9.2 발표](https://www.linuxfoundation.org/press/valkey-9.2-lowers-cost-of-ai-workloads-on-existing-infrastructure-alongside-new-distributed-kv-caching-capability)
+- [Valkey 9.2.0 릴리스 노트](https://github.com/valkey-io/valkey/releases/tag/9.2.0)
+- [OpenAI: How OpenAI Performance Factory keeps ChatGPT fast](https://openai.com/index/how-openai-performance-factory-keeps-chatgpt-fast/)
+- [VentureBeat: OpenAI reveals Performance Factory](https://venturebeat.com/orchestration/exclusive-openai-reveals-performance-factory-a-codex-powered-software-optimization-system-that-keeps-chatgpt-fast)
