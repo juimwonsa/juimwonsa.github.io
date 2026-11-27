@@ -1,0 +1,120 @@
+---
+title: '오늘의 IT 소식: 12년 묵은 Linux NFS 서버 원격 루트 NFS2ROOT, AI 에이전트에 MCP를 강제하는 Google Workspace, Cloudflare Search for Agents, 단일 실행 파일 PostgreSQL minipg'
+date: '2026-11-27'
+tags: ['IT-News', 'Security', 'Linux', 'AI-Agent', 'MCP', 'Database', 'Backend', 'Tools']
+draft: false
+summary: '인증 없이 TCP 2049 포트 하나로 루트를 얻을 수 있는 Linux 커널 nfsd 취약점 CVE-2026-99362와 배포판별 패치 현황을 정리합니다. 2027년 2월부터 AI 에이전트의 Workspace 접근을 MCP 서버로 묶는 Google의 새 쿼터 정책, 내 사이트에 에이전트용 검색 엔드포인트를 붙여 주는 Cloudflare Search for Agents, SQLite처럼 쓰는 PostgreSQL 실행 파일 minipg도 살펴봅니다.'
+---
+
+금요일 소식은 "에이전트와 서버가 만나는 접점"에 관한 이야기가 많습니다. 사내망에 조용히 떠 있는 NFS 서버의 오래된 버그, 에이전트가 Gmail과 Drive에 접근하는 방식을 바꾸는 Google의 정책, 에이전트가 내 사이트를 검색하는 표준 경로를 만들려는 Cloudflare, 그리고 로컬 개발 환경을 가볍게 만들어 줄 PostgreSQL 도구를 차례로 봅니다.
+
+## 1. NFS2ROOT: Linux 커널 NFS 서버의 인증 전 원격 루트 취약점 (CVE-2026-99362)
+
+**무엇인가요?**
+
+Linux 커널에 내장된 NFS 서버(nfsd)에서 인증 없이 힙 오버플로를 일으킬 수 있는 취약점이 공개됐습니다. 보안 업체 OpenSec이 NFS2ROOT라는 이름을 붙였고, CVSS 점수는 9.8입니다. 문제의 동작은 2014년 커밋에서 들어왔고 첫 영향 버전은 Linux 3.16이라, 약 12년 동안 코드에 남아 있던 셈입니다.
+
+**핵심 내용**
+
+- **조건**: NFSv4.1 또는 4.2를 켠 채 TCP 2049 포트가 노출된, 패치되지 않은 nfsd 서버가 대상입니다. 마운트나 자격 증명은 필요 없습니다.
+- **원리**: 클라이언트가 세션 슬롯의 응답 캐시 크기를 최솟값(0바이트)으로 요청하면 서버가 응답 버퍼를 그 한도로 줄이는데, 이후 고정 크기 복사가 버퍼를 넘어 힙 객체 뒤쪽을 덮어씁니다. 넘친 바이트 일부를 공격자가 고를 수 있습니다.
+- **익스플로잇**: OpenSec은 힙 정보 유출로 KASLR을 우회하고 가짜 콜백을 심어 루트 셸을 얻는 데모를 보였지만, 익스플로잇 코드는 공개하지 않았습니다.
+- **수정 버전**: 6.1.193, 6.6.163, 6.12.117, 6.18.61, 7.3.2와 그 이후 버전, 그리고 7.4-rc1에 수정이 들어갔습니다. 커널 업데이트 후 재부팅이 필요합니다.
+- **배포판 현황(11월 26일 무렵 기준)**: Debian trixie는 6.12.117-1로 수정됐지만 bookworm 기본 커널은 아직 취약으로 표시됐고, Ubuntu는 24.04·22.04 LTS 등 지원 버전 대부분이 취약 또는 작업 중으로 나와 있었습니다. 배포판 보안 트래커에서 이 CVE가 수정 목록에 들어간 커널인지 확인하는 것이 가장 정확합니다.
+
+**개발자에게 왜 중요한가요?**
+
+NFS는 빌드 서버의 공유 캐시, 오래된 온프레미스 파일 서버, 가상화 호스트의 스토리지처럼 "있는 줄도 잊은" 곳에 많이 떠 있습니다. 공격 트래픽이 정상 NFS 요청과 구분되지 않아 네트워크 시그니처로 잡기 어렵다는 점도 부담입니다. 아래처럼 먼저 노출 여부를 확인해 보시기 바랍니다.
+
+```bash
+uname -r                          # 커널 버전
+lsmod | grep -w nfsd              # nfsd 모듈 로드 여부
+cat /proc/fs/nfsd/versions        # +4.1 또는 +4.2 가 보이면 대상
+ss -ltn 'sport = :2049'           # 2049 포트 리슨 여부
+```
+
+**주의할 점**
+
+패치된 커널이 아직 없다면 TCP 2049를 스토리지 네트워크의 알려진 클라이언트로만 제한하거나, `/etc/nfs.conf`의 `[nfsd]` 섹션에서 `vers4.1=n`, `vers4.2=n`으로 두 버전을 끄는 완화책이 있습니다. 다만 후자는 pNFS 등 일부 기능도 함께 꺼지므로 영향 범위를 확인한 뒤 적용해야 합니다. NFS가 필요 없는 서버라면 nfsd를 아예 끄는 것이 가장 간단합니다.
+
+## 2. Google Workspace, 2027년부터 AI 에이전트는 MCP 서버로만
+
+**무엇인가요?**
+
+Google이 Workspace API와 MCP 서버의 사용 등급(tier)과 쿼터 정책을 정리하면서, AI 에이전트가 Workspace 데이터에 접근할 때는 REST API가 아니라 Google이 제공하는 MCP 서버를 쓰도록 하는 일정을 공식 문서에 못 박았습니다. 11월 24일 Gmail, Calendar, Drive, Docs, Sheets, Slides, Chat, Tasks의 MCP 서버가 정식으로 등급 체계에 들어왔습니다.
+
+**핵심 내용**
+
+- **2026년 11월 24일**: Standard·Scaled 등급이 시작됐습니다. 정식 MCP 서버는 Standard 등급에서 프로젝트·제품당 하루 5,000건(분당 한도 별도)까지 쓸 수 있고, 결제 계정이 필요 없습니다. Standard 등급에서는 MCP 쿼터 증설을 요청할 수 없습니다.
+- **2027년 2월 1일**: Workspace AI Tools Addendum이 발효됩니다. AI 에이전트나 비슷한 도구가 Workspace 데이터를 가져올 때는 MCP 서버를 써야 하고, REST API를 직접 호출하는 에이전트는 어떤 등급을 골랐든 Standard 등급 쿼터로 제한됩니다.
+- **2027년 4월 1일**: 모든 Cloud 프로젝트에 표준 사용 한도가 적용되고 Scaled 등급 과금이 시작됩니다. REST는 하루 무료 허용량을 넘으면 과금되지만, Scaled 등급의 Gmail·Calendar·Drive MCP 사용은 첫 요청부터 과금됩니다.
+- **기능 차이**: 이 소식을 정리한 Tech Stackups 기사에 따르면 Gmail MCP에는 공개적으로 메일 보내기·답장·전달 기능이 없고, Drive MCP에는 이동·이름 변경·공유 기능이 빠져 있는 등 REST와 아직 차이가 있습니다. 같은 기사는 OAuth 클라이언트에 "AI 에이전트용" 표시를 직접 선택하는 방식으로 에이전트 여부를 구분한다고 전합니다.
+- **AI가 아닌 작업**: 야간 백업이나 CRM 동기화 같은 결정적인 스크립트는 지금처럼 REST를 쓸 수 있는 것으로 설명됩니다.
+
+**개발자에게 왜 중요한가요?**
+
+Gmail이나 Drive를 읽어 요약하는 사내 봇, Firebase Functions에서 googleapis로 캘린더를 다루는 기능에 LLM을 붙여 두었다면 2월 전에 구조를 점검해야 합니다. 에이전트 경로는 MCP로 옮기고, 모델이 개입하지 않는 배치 작업은 별도 OAuth 클라이언트로 분리해 두면 쿼터와 약관 문제를 동시에 피하기 쉽습니다. Slack이 2025년 비마켓플레이스 앱의 히스토리 API를 크게 제한했던 것처럼, 대형 플랫폼이 에이전트 접근을 자사 통로로 모으는 흐름이 뚜렷해지고 있습니다.
+
+**주의할 점**
+
+Google 공식 문서는 데이터 장기 보관이나 API 스크래핑 같은 위험한 에이전트 활동을 금지하고 감사를 요구할 수 있다고 밝힙니다. 세부 조건은 Addendum 원문을 직접 확인하는 것이 안전하고, MCP 요청 단가는 아직 공개되지 않았습니다.
+
+## 3. Cloudflare Search for Agents: 내 사이트에 에이전트용 검색 엔드포인트를
+
+**무엇인가요?**
+
+Cloudflare가 11월 25일 Search for Agents를 발표했습니다. 대시보드에서 존(zone)별 토글 하나를 켜거나 API를 호출하면, Cloudflare가 AI Search 인스턴스를 만들어 사이트를 크롤링·색인하고 사이트 자체 도메인에서 검색 엔드포인트를 제공합니다.
+
+**핵심 내용**
+
+- **발견 방식**: 페이지에 `agent:endpoint`, `agent:method`, `agent:instructions`, `agent:documentation` 같은 메타 태그가 붙어 에이전트가 검색 경로를 찾을 수 있습니다. 엔드포인트는 `https://<사이트>/.well-known/search?q={query}` 형태입니다. Markdown for Agents를 켜 두면 같은 정보가 YAML 프런트 매터로도 나옵니다.
+- **응답 형태**: 생성된 답변이 아니라 검색된 문서 조각을 Markdown으로 돌려줍니다. GET 외에 올해 6월 RFC로 나온 HTTP QUERY 메서드도 지원해 본문에 질의를 담을 수 있습니다.
+- **요금과 제어**: Free 요금제를 포함한 모든 고객이 쓸 수 있고(한도 있음), 사용량은 AI Search 요금을 따릅니다. 봇 관리, AI Crawl Control, WAF 설정이 그대로 적용됩니다. Cloudflare 개발자 문서에 실제로 켜져 있습니다.
+
+**개발자에게 왜 중요한가요?**
+
+에이전트가 웹사이트를 읽을 때 지금은 HTML 전체를 긁어 와 파싱하는 경우가 대부분입니다. 문서 사이트나 기술 블로그를 운영한다면 이 기능으로 에이전트에게 검색 가능한 정식 입구를 줄 수 있고, 크롤링 부하도 줄일 수 있습니다. 반대로 에이전트를 만드는 입장에서는 사이트가 `.well-known/search`를 제공하는지 먼저 확인하는 단계를 넣어 볼 만합니다. 아직 Cloudflare가 주도하는 방식이라 다른 업체와 표준으로 자리 잡을지는 지켜봐야 합니다.
+
+## 4. minipg: PostgreSQL을 SQLite처럼 쓰는 단일 실행 파일
+
+**무엇인가요?**
+
+개발자 progrium이 PostgreSQL 서버와 클라이언트를 실행 파일 하나에 담은 minipg를 공개했습니다. 최신 릴리스는 v0.3이고 MIT 라이선스입니다. Docker나 서버 설치 없이, 명령이 필요로 할 때 서버를 띄우고 한가해지면 내립니다.
+
+**핵심 내용**
+
+- **하나의 디렉터리**: `.pgdb` 디렉터리 하나에 데이터, 설정(자동 생성된 슈퍼유저 비밀번호 포함), Postgres 버전이 함께 들어갑니다. 기본은 Postgres 18이고 17도 고를 수 있습니다.
+- **사용법**: 아래처럼 바로 psql 셸을 열거나, 앱 실행 시 `DATABASE_URL`을 넣어 줍니다. 덤프·복원, URL 조회 명령도 있습니다.
+
+```bash
+minipg app.pgdb                     # 없으면 만들고 psql 셸 열기
+minipg run app.pgdb -- npm start    # DATABASE_URL 을 설정해 앱 실행
+```
+
+- **동작 원리**: Alpine용 Postgres 바이너리를 작성자의 Zig 기반 런타임 hyper9 위에서 돌립니다. Linux(KVM 또는 네이티브 백엔드), Apple Silicon(Hypervisor.framework), Windows(Windows Hypervisor Platform)를 지원하고, 브라우저 데모도 있습니다.
+
+**개발자에게 왜 중요한가요?**
+
+Node.js 프로젝트에서 테스트나 로컬 개발용으로 Postgres를 띄우려면 보통 Docker Compose를 쓰는데, minipg는 프로젝트 폴더에 `.pgdb` 하나만 두면 됩니다. 브랜치별로 DB 디렉터리를 복사해 두거나, CI에서 가벼운 통합 테스트를 돌리는 용도로 실험해 볼 만합니다.
+
+**주의할 점**
+
+작성자 스스로 초기 단계라 다시 만들 수 없는 데이터는 넣지 말라고 경고합니다. 네이티브 백엔드는 단일 클라이언트 기준 일반 Postgres보다 2배 정도 느리고, JIT도 꺼져 있습니다. 운영용이 아니라 개발·테스트용 도구로 보는 것이 맞습니다.
+
+## 마무리
+
+오늘 소식은 "입구를 누가 정하느냐"로 묶입니다. 열어 둔 포트 하나가 루트 권한의 입구가 되고, Google과 Cloudflare는 에이전트가 들어오는 입구를 각자 정식 통로로 만들고 있습니다. 내 서비스의 입구가 어디에 몇 개 열려 있는지부터 다시 세어 보는 주말이 되면 좋겠습니다.
+
+## 참고 자료
+
+- [OpenSec: NFS2ROOT (CVE-2026-99362): pre-auth root in Linux nfsd](https://opensec.in/blog/nfs2root-cve-2026-99362)
+- [GeekNews: NFS2ROOT, Linux 커널 NFS 서버에 12년간 존재한 인증 전 원격 루트 취약점](https://news.hada.io/topic?id=37896)
+- [The Terminal: CVE-2026-99362 배포판별 패치 현황](https://theterminal.space/security/nfsd-cve-2026-99362-slab-overflow-debian-ubuntu)
+- [Google for Developers: Usage tiers and quotas for Google Workspace APIs and MCP servers](https://developers.google.com/workspace/tools-safety)
+- [Google Workspace Updates: Agent tools and security updates for Workspace developers](https://workspaceupdates.googleblog.com/2026/05/agent-tools-and-security-updates-for-workspace-developers.html)
+- [Tech Stackups: Google Workspace AI agents and MCP](https://techstackups.com/articles/google-workspace-ai-agents-mcp/)
+- [GeekNews: Google, AI 에이전트에 자사 MCP 서버 사용 의무화 예정](https://news.hada.io/topic?id=37919)
+- [Cloudflare Blog: Introducing Search for Agents](https://blog.cloudflare.com/search-for-agents/)
+- [minipg 프로젝트 페이지](https://progrium.github.io/minipg/)
+- [minipg GitHub 릴리스](https://github.com/progrium/minipg/releases)
+- [GeekNews: minipg, PostgreSQL을 단일 실행 파일로 실행하기](https://news.hada.io/topic?id=37897)
